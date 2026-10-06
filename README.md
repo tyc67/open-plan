@@ -9,12 +9,17 @@ pnpm install
 pnpm dev
 ```
 
-Build with `pnpm build`; preview with `pnpm preview`.
+Build with `pnpm build` (core, then web); preview with `pnpm preview`. Run core tests with `pnpm test` and type checks with `pnpm typecheck`.
+
+This is a pnpm workspace: `apps/web` is the editor and `packages/core` is the framework-free TypeScript core that it imports. The plan for the next steps is in `docs/plan-import-roadmap.md`; the defect review is in `docs/feature-review.md`.
 
 The React editor displays the reference apartment in an SVG 2D plan and a Three.js 3D view. Switch views with the floating canvas toolbar. The workspace reuses Mamezu’s tab rails, collapsible panels, scrollable toolbar, and tooltips, with local appearance preferences and a project name field. In 3D, orbit, zoom, pan, adjust wall height, and click furniture to select it; drag selected furniture to move it. Both views share the same document and undo history. Add, select, drag, resize, rotate, and delete furniture; undo/redo; export document JSON. Coordinates are millimetres. Local autosave uses `open-plan:document:v1`; data belongs to the browser origin and is not uploaded. JSON import is not implemented yet.
 
 ## Layout
 
+- `apps/web/`: the editor (Vite + React). The paths below are relative to `apps/web/`.
+- `packages/core/`: TypeScript core package, consumed through its public exports. It now holds the length units; the roadmap moves the plan model into it.
+- `tools/visual/`: headless-Chrome screenshot capture and exact pixel compare for regression checks. Output goes to `tools/visual/out/` and is not committed.
 - `src/workspace/`: Mamezu-derived workspace shell, tab rails, panel wrappers, scrolling toolbar, and tooltips. Desktop side panels collapse; on mobile one panel opens over the canvas. UI preferences use `open-plan:workspace:v1`.
 - `src/floorplan/document.js`: versioned floor-plan document factory and validation.
 - `src/floorplan/seed.js`: original apartment geometry, materials, and furniture library.
@@ -24,8 +29,8 @@ The React editor displays the reference apartment in an SVG 2D plan and a Three.
 - `src/floorplan/FurnitureSymbol.jsx` and `furnitureSymbols.js`: detailed reference furniture symbols rendered as native React SVG nodes, including pillows, blankets, cushions, cabinet divisions, and appliance details.
 - `src/floorplan/FloorPlan3D.jsx` and `three/`: React-managed 3D viewer, procedural furniture, floor textures, architecture, and coordinate conversion. Three.js is installed locally; the active viewer has no CDN dependency.
 - `src/floorplan/storage.js`: isolated local persistence adapter.
-- `reference/floorplan-3d.html`: unchanged visual and behavioral reference, including its CDN-dependent 3D viewer.
-- `donor/mamezu/`: complete tracked source snapshot from Mamezu, retained for incremental migration. Its application, cloud configuration, and deployment scripts are not part of the active app.
+- `reference/floorplan-3d.html` (repository root): unchanged visual and behavioral reference, including its CDN-dependent 3D viewer. **Not tracked by Git** (`.gitignore`); it exists only in local copies.
+- `donor/mamezu/` (repository root): local source snapshot from Mamezu, retained for incremental migration. **Not tracked by Git** (`.gitignore`); it exists only in local copies. Its application, cloud configuration, and deployment scripts are not part of the active app.
 
 ## Next migration steps
 
@@ -34,4 +39,4 @@ The React editor displays the reference apartment in an SVG 2D plan and a Three.
 3. Extend the 3D viewer with walkthrough mode, animated doors, and lighting controls.
 4. Add wall/opening editing, snapping, room materials, and measurement tools.
 
-The 2D furniture symbols reproduce the reference geometry and colors, with upright furniture labels and a separate selection outline. Door leaves, dashed swing arcs, sliding-door panels, window frames, and perimeter dimensions also match the reference. Dimensions are millimetres and can be toggled; view controls include 1:60, 1:100, and fit-to-view. Room floor patterns, gesture navigation, and some 3D features remain to be ported. Orbit viewing and detailed procedural furniture are available; walkthrough mode and animated view transitions remain future work. Source attribution and donor third-party notices are retained under `donor/mamezu/`; check them before redistribution.
+The 2D furniture symbols reproduce the reference geometry and colors, with upright furniture labels and a separate selection outline. Door leaves, dashed swing arcs, sliding-door panels, window frames, and perimeter dimensions also match the reference. Dimensions are millimetres and can be toggled; view controls include 1:60, 1:100, and fit-to-view. Room floor patterns, gesture navigation, and some 3D features remain to be ported. Orbit viewing and detailed procedural furniture are available; walkthrough mode and animated view transitions remain future work. Source attribution and donor third-party notices are under `donor/mamezu/` in local copies only, because that folder is not tracked; check them before redistribution.

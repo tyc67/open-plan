@@ -7,3 +7,4 @@ dist/
 /donor/
 /reference/
 /tools/visual/out/
+.pnpm-store/

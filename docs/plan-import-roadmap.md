@@ -52,7 +52,7 @@ open-plan/
 
 ## Current blockers
 
-The seed data is only one part. These parts of the code also assume the reference apartment. Locations are `path:line` on 2026-10-06, relative to `src/floorplan/`.
+The seed data is only one part. These parts of the code also assume the reference apartment. Locations are `path:line` on 2026-10-06, relative to `apps/web/src/floorplan/` (before A0 the same files were in `src/floorplan/`).
 
 | Blocker | Location | Effect with a different plan |
 | --- | --- | --- |
