@@ -1,0 +1,4 @@
+export const DEFAULT_LAYERS={roomNames:true,furniture:true,furnitureLabels:true,dimensions:true,areas:true,bearing:false,locked:{roomNames:false,furniture:false,furnitureLabels:false,dimensions:false,areas:false}};
+const KEY='open-plan:layers:v1';
+export function loadLayers(){try{const saved=JSON.parse(localStorage.getItem(KEY));return {...DEFAULT_LAYERS,locked:Object.fromEntries(['roomNames','furniture','furnitureLabels','dimensions','areas'].map(key=>[key,saved?.locked?.[key]===true])),...Object.fromEntries(['roomNames','furniture','furnitureLabels','dimensions','areas','bearing'].filter(key=>typeof saved?.[key]==='boolean').map(key=>[key,saved[key]]))};}catch{return {...DEFAULT_LAYERS};}}
+export function saveLayers(layers){try{localStorage.setItem(KEY,JSON.stringify(layers));}catch{/* Display preferences are optional. */}}
