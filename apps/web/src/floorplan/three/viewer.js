@@ -89,7 +89,7 @@ export function createViewer(host, callbacks) {
   function sync(doc, options) {
     roomPolygons=doc.rooms;currentDoc=doc;snapEnabled=options.wallSnap;furnitureLocked=options.furnitureLocked;currentUnit=options.unit||'mm';
     if(drag&&(furnitureLocked||!options.furniture||!doc.furniture.some(f=>f.id===drag.id)))cancelDrag();
-    const signature = JSON.stringify([doc.rooms,doc.walls,doc.openings,options.cut,options.bearing]);
+    const signature = JSON.stringify([doc.rooms,doc.walls,doc.openings,doc.ceilingHeight,options.cut,options.bearing]);
     if(signature !== archSignature) {
       archSignature = signature;
       if(architecture) disposeGeometry(architecture);

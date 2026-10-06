@@ -2,18 +2,19 @@
 // This module is self-contained; ignored reference/donor directories are not needed at runtime.
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
-import { planGeometry } from 'open-plan-core';
+import { effectiveCeilingHeight, planGeometry } from 'open-plan-core';
 import { wx, wz, mm } from './coordinates.js';
 
 export function createModelFactory(renderer, environment) {
-const M = mm, H = 2.8;
+const M = mm;
 // Low-wall height in metres, and the gap between a hinged door leaf and its head in millimetres.
 const LOW_WALL = 1, DOOR_CLEARANCE = 50;
 const glassMat = new THREE.MeshPhysicalMaterial({color:0xcfe6ef,roughness:.05,transparent:true,opacity:.28,depthWrite:false,side:THREE.DoubleSide});
 const wallMat = new THREE.MeshStandardMaterial({color:'#f4f1eb',roughness:.92});
 const capMat = new THREE.MeshStandardMaterial({color:'#d5cec0',roughness:.8});
 const frameMat = new THREE.MeshStandardMaterial({color:'#686d6c',roughness:.4});
-let archFloor, archUp, lampG, ROOMS, WALLS, WINS, DOORS, SLIDES, HOLES;
+// CEILING is the plan's effective ceiling height in metres (clamped to the valid range), set for each architecture build.
+let archFloor, archUp, lampG, ROOMS, WALLS, WINS, DOORS, SLIDES, HOLES, CEILING;
 const doors = [], opt = {cut:.9,mode:'orbit'};
 let colliders = [];
 const matCache = new Map();
@@ -687,11 +688,11 @@ function buildArch(){
     if (bay){ fl.castShadow = true; archUp.add(fl); } else archFloor.add(fl);
     // 天花：法線朝下，只在室內仰視時可見
     const cg = new THREE.ShapeGeometry(shapeOf(r.poly, true)); cg.rotateX(Math.PI/2);
-    const ceil = new THREE.Mesh(cg, mat('#fbfaf7', {roughness:1})); ceil.position.y = H; ceil.visible = top >= H; archUp.add(ceil);
+    const ceil = new THREE.Mesh(cg, mat('#fbfaf7', {roughness:1})); ceil.position.y = CEILING; ceil.visible = top >= CEILING; archUp.add(ceil);
     if (r.at){
       const lamp = new THREE.Mesh(new THREE.CylinderGeometry(.22, .22, .02, 32), mat('#fff', {emissive:'#fff2d6', emissiveIntensity:.3}));
-      lamp.position.set(wx(r.at[0]), H - .012, wz(r.at[1])); lamp.visible = top >= H; lampG.add(lamp);
-      const pl = new THREE.PointLight(0xffd9a8, 0, 7, 1.6); pl.position.set(wx(r.at[0]), H - .25, wz(r.at[1])); lampG.add(pl);
+      lamp.position.set(wx(r.at[0]), CEILING - .012, wz(r.at[1])); lamp.visible = top >= CEILING; lampG.add(lamp);
+      const pl = new THREE.PointLight(0xffd9a8, 0, 7, 1.6); pl.position.set(wx(r.at[0]), CEILING - .25, wz(r.at[1])); lampG.add(pl);
     }
   });
   [...DOORS, ...SLIDES].forEach(d => { const [x0, y0, x1, y1] = d.rect; const s = box(M(x1-x0), .012, M(y1-y0), mat('#d8d0c0', {roughness:.3}), wx((x0+x1)/2), 0, wz((y0+y1)/2)); s.castShadow = false; archFloor.add(s); });
@@ -743,7 +744,7 @@ function buildArch(){
 
 
 function architecture(doc, cut, bearing=false) {
-  ROOMS = doc.rooms;
+  ROOMS = doc.rooms; CEILING = M(effectiveCeilingHeight(doc));
   // Solid wall parts and visible openings come from the v2 data (walls minus their openings).
   const geometry = planGeometry(doc);
   WALLS = geometry.solids.map(s => [...s.rect, s.type, s.wallId, s.demolished]);

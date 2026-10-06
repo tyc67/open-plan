@@ -17,7 +17,7 @@ const browser = await chromium.launch({ executablePath: CHROME, headless: true, 
 const shots = [];
 try {
   for (const viewport of VIEWPORTS) for (const scene of SCENES) {
-    const { view, cut } = scene, name = shotName(viewport, scene);
+    const { view, level } = scene, name = shotName(viewport, scene);
     const context = await browser.newContext({ viewport, deviceScaleFactor: 1, reducedMotion: 'reduce', colorScheme: 'light', locale: 'zh-TW', timezoneId: 'Asia/Taipei' });
     const page = await context.newPage();
     const errors = [];
@@ -27,7 +27,7 @@ try {
     if (view === '3d') {
       await page.getByRole('button', { name: '3D 檢視' }).first().click();
       await page.waitForSelector('[aria-label="3D floor-plan view"] canvas', { timeout: 30000 });
-      await page.locator('.three-toolbar select').selectOption(cut);
+      await page.locator('.three-toolbar select').selectOption(level);
     }
     // Move the pointer off every control, so no hover state or tooltip is captured.
     await page.mouse.move(viewport.width - 1, viewport.height - 1);
