@@ -1,3 +1,4 @@
+import { planGeometry } from 'open-plan-core';
 import { containsPoint } from './roomGeometry.js';
 
 // Trig at 90° leaves float noise (1789.9999999999998). 0.1 mm keeps odd sizes (half mm) flush.
@@ -10,7 +11,8 @@ export function snapFurniture(f,cx,cy,doc,tolerance,enabled=true,align=true) {
   let nx=Math.round(cx/10)*10,ny=Math.round(cy/10)*10,bx=tolerance,by=tolerance;
   let vertical=null,horizontal=null;
   if(!enabled&&!align)return {cx:nx,cy:ny,guides:[]};
-  const rects=enabled?[...doc.walls.filter(w=>!w.demolished).map(w=>w.rect),...doc.openings.filter(o=>o.type==='window').map(o=>o.rect)]:[];
+  const geometry=planGeometry(doc);
+  const rects=enabled?[...geometry.solids.filter(s=>!s.demolished).map(s=>s.rect),...geometry.openings.filter(o=>o.type==='window').map(o=>o.rect)]:[];
   for(const [x0,y0,x1,y1] of rects){
     if(cy+hh>y0&&cy-hh<y1){
       for(const [face,target,side] of [[x0,x0-hw,-1],[x1,x1+hw,1]]){

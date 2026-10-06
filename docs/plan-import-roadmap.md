@@ -140,7 +140,7 @@ Move the files first, and change no behaviour. A regression is then either from 
 - The undo history starts empty after migration.
 - **Input check first:** the v1 validator accepts data that the migration cannot read (for example an unknown opening type such as `archway`, a door without `h`, duplicate wall ids, or a reversed rect). The migration checks its input first and stops with a `MigrationError` (`code` and `path`), with no change. At load this follows the H2 path.
 - **Generated ids** (wall pieces, bay-window holes) are always unique: `base`, then `base-2`, `base-3` and so on.
-- The migration runs at load. The v1 data is kept under the recovery key until the first save in v2.
+- The migration runs at load. Before it, the raw v1 data is copied to its own key (`open-plan:document:v1:before-v2`), which v2 saves never overwrite. If that copy cannot be written, the plan is not migrated and the load fails safely (H2 path).
 
 ### A2. Height contract
 
@@ -212,7 +212,7 @@ One validator is used for saved documents at load, for imports, by the CLI and M
     - Size: the plan is not larger than 100 × 100 m; at most 2,000 walls, 2,000 openings, 500 rooms and 5,000 furniture items.
 - **Two classes of rule:**
     - **Errors that block rendering** are errors for every source and every version: missing or wrong-type fields, numbers that are not finite, unknown enums, duplicate ids, a `wallId` that does not exist, a zero-length wall, thickness out of range, an opening outside its wall length, a room polygon with fewer than 3 points.
-    - **Tolerable issues** can be shown and edited safely: self-crossing or very small room polygons, overlapping openings in one wall, a room `mat` with no material (drawn with a default material), heights out of range (drawn clamped), a plan larger than the size limits.
+    - **Tolerable issues** can be shown and edited safely: self-crossing or very small room polygons, overlapping openings in one wall, a room `mat` with no material (drawn with a default material), heights out of range (drawn clamped), a plan larger than the size limits, a window in a `low` wall (its glass stands above the low wall).
 - **Policy by source, not by version:**
     - **Saved plans** (localStorage, or the file in `serve`): tolerable issues are **warnings**, in v1 and in v2, so a plan that loaded before a save also loads after it. Errors that block rendering follow the H2 path: the data is kept in the recovery copy and the plan does not open.
     - **Import, CLI `validate` and MCP tools:** tolerable issues are **errors**. The agent or the user must correct them.

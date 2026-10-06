@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import ErrorBoundary from '../ErrorBoundary.jsx';
 import { createId } from './ids.js';
+import { planGeometry } from 'open-plan-core';
 import { RotateCw, Trash2 } from 'lucide-react';
 import WorkspaceShell from '../workspace/WorkspaceShell.jsx';
 import { createDocument } from './document.js';
@@ -296,9 +297,9 @@ export default function FloorPlanEditor() {
           {selected===f.id && <rect className="selected-furniture-outline" x={-f.w/2-24} y={-f.d/2-24} width={f.w+48} height={f.d+48} rx="40" fill="none" stroke="#2563eb" strokeWidth="2" vectorEffect="non-scaling-stroke" pointerEvents="none"/>}
         </g>)}
         {layers.furnitureLabels&&<g className="furniture-labels" pointerEvents="none">{doc.furniture.filter(f=>Math.min(f.w,f.d)>=380&&!NO_FURNITURE_LABEL.has(f.type)).map(f=><text key={f.id} x={f.cx} y={f.cy} fontSize={Math.max(80,Math.min(170,Math.min(f.w,f.d)*.2))} textAnchor="middle" dominantBaseline="central" fill="#4a443c" opacity=".8">{f.name}</text>)}</g>}
-        {doc.walls.map(w=><rect key={w.id} data-wall-id={w.id} className={wall?.id===w.id?'selected-wall-outline':undefined} x={w.rect[0]} y={w.rect[1]} width={w.rect[2]-w.rect[0]} height={w.rect[3]-w.rect[1]} fill={w.demolished?'#ef4444':w.type==='b'?'#000000':w.type==='low'?'#e9e3d8':w.type==='e'?'#8f897d':'#a7a195'} fillOpacity={w.demolished?0.12:1} stroke={wall?.id===w.id?'#f59e0b':w.demolished?'#ef4444':w.type==='low'?'#8f897d':'none'} strokeWidth={wall?.id===w.id?3:1.2} strokeDasharray={w.demolished?'5 3':undefined} vectorEffect="non-scaling-stroke" onPointerDown={e=>{if(e.button===0&&tool==='select'&&!spaceHeld.current){e.stopPropagation();if(e.pointerType==='touch'){touchRoom.current={kind:'wall',id:w.id,pointerId:e.pointerId,x:e.clientX,y:e.clientY};svg.current.setPointerCapture(e.pointerId);}else selectWall(w.id);}}}/>)}
+        {planGeometry(doc).solids.map((w,i)=><rect key={`${w.wallId}:${i}`} data-wall-id={w.wallId} className={wall?.id===w.wallId?'selected-wall-outline':undefined} x={w.rect[0]} y={w.rect[1]} width={w.rect[2]-w.rect[0]} height={w.rect[3]-w.rect[1]} fill={w.demolished?'#ef4444':w.type==='b'?'#000000':w.type==='low'?'#e9e3d8':w.type==='e'?'#8f897d':'#a7a195'} fillOpacity={w.demolished?0.12:1} stroke={wall?.id===w.wallId?'#f59e0b':w.demolished?'#ef4444':w.type==='low'?'#8f897d':'none'} strokeWidth={wall?.id===w.wallId?3:1.2} strokeDasharray={w.demolished?'5 3':undefined} vectorEffect="non-scaling-stroke" onPointerDown={e=>{if(e.button===0&&tool==='select'&&!spaceHeld.current){e.stopPropagation();if(e.pointerType==='touch'){touchRoom.current={kind:'wall',id:w.wallId,pointerId:e.pointerId,x:e.clientX,y:e.clientY};svg.current.setPointerCapture(e.pointerId);}else selectWall(w.wallId);}}}/>)}
 
-        <OpeningSymbols openings={doc.openings}/>
+        <OpeningSymbols openings={planGeometry(doc).openings}/>
         <SnapGuides guides={snapGuides} unit={unit} ratio={ratio}/>
         <Measurements selectedId={selectedMeasurement} onSelect={selectMeasurement} selectable={tool==='select'&&!spacePan&&!layers.locked.dimensions} measurements={layers.dimensions?doc.measurements:[]} preview={measurePreview} snapPoint={measurementSnap} unit={unit} ratio={ratio}/>
         {layers.dimensions&&<DimensionLines chains={doc.dimensions} unit={unit}/>}

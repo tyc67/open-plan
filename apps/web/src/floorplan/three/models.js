@@ -2,15 +2,18 @@
 // This module is self-contained; ignored reference/donor directories are not needed at runtime.
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { planGeometry } from 'open-plan-core';
 import { wx, wz, mm } from './coordinates.js';
 
 export function createModelFactory(renderer, environment) {
 const M = mm, H = 2.8;
+// Low-wall height in metres, and the gap between a hinged door leaf and its head in millimetres.
+const LOW_WALL = 1, DOOR_CLEARANCE = 50;
 const glassMat = new THREE.MeshPhysicalMaterial({color:0xcfe6ef,roughness:.05,transparent:true,opacity:.28,depthWrite:false,side:THREE.DoubleSide});
 const wallMat = new THREE.MeshStandardMaterial({color:'#f4f1eb',roughness:.92});
 const capMat = new THREE.MeshStandardMaterial({color:'#d5cec0',roughness:.8});
 const frameMat = new THREE.MeshStandardMaterial({color:'#686d6c',roughness:.4});
-let archFloor, archUp, lampG, ROOMS, WALLS, WINS, DOORS, SLIDES;
+let archFloor, archUp, lampG, ROOMS, WALLS, WINS, DOORS, SLIDES, HOLES;
 const doors = [], opt = {cut:.9,mode:'orbit'};
 let colliders = [];
 const matCache = new Map();
@@ -694,16 +697,17 @@ function buildArch(){
   [...DOORS, ...SLIDES].forEach(d => { const [x0, y0, x1, y1] = d.rect; const s = box(M(x1-x0), .012, M(y1-y0), mat('#d8d0c0', {roughness:.3}), wx((x0+x1)/2), 0, wz((y0+y1)/2)); s.castShadow = false; archFloor.add(s); });
   WALLS.forEach((w, i) => {
     const demolished=w[6];
-    const mesh=wallBox(w,0,demolished?0.03:w[4]==='low'?Math.min(1,top):top,demolished?mat('#ef4444',{transparent:true,opacity:.55}):w[4]==='b'?mat('#000000'):undefined);
+    const mesh=wallBox(w,0,demolished?0.03:w[4]==='low'?Math.min(LOW_WALL,top):top,demolished?mat('#ef4444',{transparent:true,opacity:.55}):w[4]==='b'?mat('#000000'):undefined);
     if(mesh)mesh.userData.wall=w[5];
     if(!demolished)colliders.push([wx(w[0]), wz(w[1]), wx(w[2]), wz(w[3])]);
   });
   // 門洞、飄窗洞口上方過梁
-  [...DOORS.map(d => [d.rect, 2.1]), ...SLIDES.map(s => [s.rect, s.v ? 2.4 : 2.1]), [[10270,800,10510,2600], 2.4], [[10270,4260,10510,5740], 2.4]]
+  // A low wall has no lintel: the wall itself is below the opening's head.
+  [...DOORS, ...SLIDES, ...HOLES].filter(o => o.wallType !== 'low').map(o => [o.rect, M(o.head)])
     .forEach(([r, h]) => { if (top > h) wallBox(r, h, top); });
-  WINS.forEach((r, i) => {
-    const sill = i === 0 ? 1.4 : i >= 6 ? .45 : .9, head = 2.4;
-    wallBox(r, 0, Math.min(sill, top)); if (top > head) wallBox(r, head, top);
+  WINS.forEach(({rect: r, sill: sillMm, head: headMm, wallType}) => {
+    const sill = M(sillMm), head = M(headMm), low = wallType === 'low';
+    wallBox(r, 0, Math.min(sill, low ? LOW_WALL : Infinity, top)); if (!low && top > head) wallBox(r, head, top);
     colliders.push([wx(r[0]), wz(r[1]), wx(r[2]), wz(r[3])]);
     const gTop = Math.min(head, top); if (gTop <= sill) return;
     const [x0, y0, x1, y1] = r, hz = (x1-x0) >= (y1-y0), L = M(hz ? x1-x0 : y1-y0), gh = gTop - sill, cx = wx((x0+x1)/2), cz = wz((y0+y1)/2);
@@ -714,7 +718,8 @@ function buildArch(){
     [sill + .02, gTop - .02].forEach(y => { const tr = new THREE.Mesh(new THREE.BoxGeometry(hz ? L : .06, .04, hz ? .06 : L), frameMat); tr.position.set(cx, y, cz); archUp.add(tr); });
   });
   DOORS.forEach(d => {
-    const pivot = new THREE.Group(), L = M(d.len), dh = Math.min(2.05, top);
+    // The leaf stops DOOR_CLEARANCE below the head (2100 → 2050 mm in the sample).
+    const pivot = new THREE.Group(), L = M(d.len), dh = Math.min(M(d.head - DOOR_CLEARANCE), top);
     pivot.position.set(wx(d.h[0]), 0, wz(d.h[1]));
     const leaf = box(L, dh, .04, mat(d.entry ? '#6b4f3a' : '#efe6d8', {roughness:.5}), L/2);
     const knob = new THREE.Mesh(new THREE.SphereGeometry(.03, 12, 8), metal()); knob.position.set(L - .07, Math.min(1, dh - .05), 0); knob.scale.z = 2.2;
@@ -724,8 +729,8 @@ function buildArch(){
     door.cur = door.a1; pivot.rotation.y = door.cur; leaf.userData.door = knob.userData.door = door;
     doors.push(door); archUp.add(pivot);
   });
-  SLIDES.forEach(({rect:[x0, y0, x1, y1], v}) => {
-    const L = M(v ? y1-y0 : x1-x0), ph = Math.min(v ? 2.4 : 2.1, top), pl = L*.55;
+  SLIDES.forEach(({rect:[x0, y0, x1, y1], v, head}) => {
+    const L = M(v ? y1-y0 : x1-x0), ph = Math.min(M(head), top), pl = L*.55;
     [[-1, -.02], [1, .02]].forEach(([s, off]) => {
       const c = s < 0 ? -L/2 + pl/2 : L/2 - pl/2, x = v ? wx((x0+x1)/2) + off : wx(x0) + L/2 + c, z = v ? wz(y0) + L/2 + c : wz((y0+y1)/2) + off;
       const p = new THREE.Mesh(new THREE.BoxGeometry(v ? .02 : pl, ph, v ? pl : .02), glassMat); p.position.set(x, ph/2, z); archUp.add(p);
@@ -739,10 +744,13 @@ function buildArch(){
 
 function architecture(doc, cut, bearing=false) {
   ROOMS = doc.rooms;
-  WALLS = doc.walls.map(w => [...w.rect, w.type,w.id,!!w.demolished]);
-  WINS = doc.openings.filter(o => o.type === 'window').map(o => o.rect);
-  DOORS = doc.openings.filter(o => o.type === 'door');
-  SLIDES = doc.openings.filter(o => o.type === 'sliding-door');
+  // Solid wall parts and visible openings come from the v2 data (walls minus their openings).
+  const geometry = planGeometry(doc);
+  WALLS = geometry.solids.map(s => [...s.rect, s.type, s.wallId, s.demolished]);
+  WINS = geometry.openings.filter(o => o.type === 'window');
+  DOORS = geometry.openings.filter(o => o.type === 'door');
+  SLIDES = geometry.openings.filter(o => o.type === 'sliding-door');
+  HOLES = geometry.openings.filter(o => o.type === 'hole');
   opt.cut = cut;opt.bearing=bearing;
   archFloor = new THREE.Group(); archUp = new THREE.Group(); lampG = new THREE.Group();
   buildArch();

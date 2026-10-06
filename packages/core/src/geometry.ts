@@ -23,7 +23,7 @@ export const rightNormal = ([dx, dy]: Point): Point => [-dy, dx];
 const isAxisAligned = ({ a, b }: WallLine) => a[0] === b[0] || a[1] === b[1];
 
 /** Rect of the part of a wall between two distances from `a`, with the full thickness. Axis-aligned walls only in this phase. */
-function segmentRect(wall: WallLine, from: number, to: number): Rect {
+export function segmentRect(wall: WallLine, from: number, to: number): Rect {
   if (!isAxisAligned(wall)) throw new Error('wall-not-axis-aligned');
   const [ux, uy] = wallDirection(wall), half = wall.thickness / 2;
   const p: Point = [wall.a[0] + from * ux, wall.a[1] + from * uy], q: Point = [wall.a[0] + to * ux, wall.a[1] + to * uy];

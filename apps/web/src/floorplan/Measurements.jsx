@@ -1,15 +1,17 @@
+import { planGeometry } from 'open-plan-core';
 import { formatLength } from './units.js';
 
 export function snapMeasurement(point,doc,mmPerPixel,anchor,lockAxis) {
   const tolerance=8*mmPerPixel;
   const segments=[];
-  for(const wall of doc.walls.filter(w=>!w.demolished)){const [x0,y0,x1,y1]=wall.rect;segments.push([{x:x0,y:y0},{x:x1,y:y0}],[{x:x1,y:y0},{x:x1,y:y1}],[{x:x1,y:y1},{x:x0,y:y1}],[{x:x0,y:y1},{x:x0,y:y0}]);}
-  for(const opening of doc.openings.filter(o=>o.rect)){const [x0,y0,x1,y1]=opening.rect;segments.push([{x:x0,y:y0},{x:x1,y:y0}],[{x:x1,y:y0},{x:x1,y:y1}],[{x:x1,y:y1},{x:x0,y:y1}],[{x:x0,y:y1},{x:x0,y:y0}]);}
+  const geometry=planGeometry(doc);
+  for(const wall of geometry.solids.filter(s=>!s.demolished)){const [x0,y0,x1,y1]=wall.rect;segments.push([{x:x0,y:y0},{x:x1,y:y0}],[{x:x1,y:y0},{x:x1,y:y1}],[{x:x1,y:y1},{x:x0,y:y1}],[{x:x0,y:y1},{x:x0,y:y0}]);}
+  for(const opening of geometry.openings){const [x0,y0,x1,y1]=opening.rect;segments.push([{x:x0,y:y0},{x:x1,y:y0}],[{x:x1,y:y0},{x:x1,y:y1}],[{x:x1,y:y1},{x:x0,y:y1}],[{x:x0,y:y1},{x:x0,y:y0}]);}
   let result={x:Math.round(point.x/10)*10,y:Math.round(point.y/10)*10},best=tolerance;
   const horizontal=anchor&&lockAxis&&Math.abs(point.x-anchor.x)>=Math.abs(point.y-anchor.y);
   const constrained=anchor&&lockAxis?{x:horizontal?point.x:anchor.x,y:horizontal?anchor.y:point.y}:point;
   const targets=[
-    ...doc.openings.filter(o=>o.type==='door'&&o.h).map(o=>({x:o.h[0],y:o.h[1],snap:'hinge'})),
+    ...geometry.openings.filter(o=>o.type==='door').map(o=>({x:o.h[0],y:o.h[1],snap:'hinge'})),
     ...segments.flatMap(([a,b])=>[{...a,snap:'corner'},{...b,snap:'corner'}]),
     ...doc.rooms.flatMap(r=>r.poly.map(([x,y])=>({x,y,snap:'corner'}))),
   ];
