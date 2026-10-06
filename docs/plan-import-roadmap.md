@@ -23,6 +23,7 @@ Open Plan is also **a tool for agents**. Agents with a shell (Claude Code, Codex
 - **v6 (2026-10-06):** open questions resolved into decisions and tasks: empty first plan, mode-aware privacy text, separate storage modes with a visible mode indicator. Shadows wait for the 100 × 100 m test. The package name stays open; examples use placeholders.
 - **v7 (2026-10-06):** new **Repository structure** section (pnpm monorepo: `apps/web`, `packages/core` in TypeScript, `packages/cli` in Step C; Vitest) and new **A0, relocation** with baseline screenshots before any geometry change.
 - **v8 (2026-10-06):** review changes. A guarded migration rule for the two sample bay-window holes. File mode: reload of a file that is valid again respects unsaved edits; "保留我的版本" uses the last seen revision and backs up the external version; a backup folder written under the same lock as each write; one recovery snapshot per session before the first autosave, in both modes. `update_wall` and `update_opening` accept only safe fields, with named commands for the rest. Screenshot stability settings for A0.
+- **v9 (2026-10-06):** migration review: input check with `MigrationError`, unique generated ids, the exact rule for what blocks the bay-window holes, and input versus normalized v2 types.
 
 ## Repository structure
 
@@ -133,10 +134,12 @@ Move the files first, and change no behaviour. A regression is then either from 
 - **Demolition state of a generated piece:** always `false`, because v1 always draws its openings. If a touching wall is demolished, the report lists it, and the user decides.
 - **Doors:** `hinge` is `start` or `end`, from the end of the opening where `h` is. `swing` is `right` if `o` equals the right normal, otherwise `left`. The hinge formula must give back the v1 `h` exactly; if it does not, or if `c` does not point from the hinge into the opening, the report lists the door.
 - **Sample bay-window holes (sample-specific rule):** in v1, the two holes in the wall line x 10270–10510 (y 800–2600 and y 4260–5740) exist only as lintel coordinates in the renderer, not in the document. The migration creates them as two `hole` openings, each in its own wall piece, head 2400. Piece types from the type rule: `e` for the first, `b` for the second.
-    - **Guard:** the rule runs only when the four end pieces exist exactly (`e [10270,300,10510,800]`, `e [10270,2600,10510,3090]`, `b [10270,3090,10510,4260]`, `b [10270,5740,10510,6370]`) **and no wall, opening or other geometry overlaps either gap**. Otherwise the plan gets no holes, and the report says why.
+    - **Guard:** the rule runs only when the four end pieces exist exactly (`e [10270,300,10510,800]`, `e [10270,2600,10510,3090]`, `b [10270,3090,10510,4260]`, `b [10270,5740,10510,6370]`) **and no wall rect or opening rect overlaps the inside of either gap** (touching a gap's edge is allowed, because the end pieces touch it). Rooms, furniture, measurements and dimensions do not block the rule: the sample's bay-window rooms cover the gaps by design. Otherwise the plan gets no holes, and the report says why.
     - The report marks these two holes as "sample-specific".
 - **Joining** a generated piece with its neighbours into one continuous wall is a user action (`join_walls`, C1), not part of the migration.
 - The undo history starts empty after migration.
+- **Input check first:** the v1 validator accepts data that the migration cannot read (for example an unknown opening type such as `archway`, a door without `h`, duplicate wall ids, or a reversed rect). The migration checks its input first and stops with a `MigrationError` (`code` and `path`), with no change. At load this follows the H2 path.
+- **Generated ids** (wall pieces, bay-window holes) are always unique: `base`, then `base-2`, `base-3` and so on.
 - The migration runs at load. The v1 data is kept under the recovery key until the first save in v2.
 
 ### A2. Height contract
@@ -195,6 +198,7 @@ This applies to **Import**, **New empty plan** and **Load sample apartment**.
 
 One validator is used for saved documents at load, for imports, by the CLI and MCP tools (Step C), and as the source for the published JSON Schema. It lives in the core package (C1).
 
+- **Two type levels:** `PlanV2Input` is what an import or a plan file may contain; heights and `ceilingHeight` are optional. `PlanV2` is the normalized plan that the app and the commands use; every height is present. The validator turns valid input into a `PlanV2` by filling the A2 defaults. Exports write the normalized form.
 - **Result:** `{ ok, errors: [{ path, code, params }], warnings: [...] }`. Example: `{ path: "openings[2].width", code: "opening-outside-wall", params: { wallLength: 3000 } }`.
 - **Messages:** the UI makes zh-TW text from `code` and `params`, for example "第 3 個開口：超出牆的長度 3000 mm". The user can paste the message back to the agent. Show the first 20 errors and the total count.
 - **Rules:**
