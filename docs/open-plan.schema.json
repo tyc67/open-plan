@@ -1,0 +1,144 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://open-plan.local/schema/plan-v2.json",
+  "title": "Open Plan floor plan, schema version 2",
+  "description": "Structural rules only: fields, types, enums and ranges of single values. Units are millimetres; x goes right and y goes down. Heights may be left out; the validator fills the defaults (ceiling 2800, window sill 900 and head 2400, other heads 2100). The validator in open-plan-core also checks these semantic rules, which this schema cannot express: ids are unique in each list; every opening's wallId names a wall; a wall's a and b are different, and the wall is horizontal or vertical; offset + width is not more than the wall length; openings in one wall do not overlap; a window's sill is below its head; every head is not above ceilingHeight (a height that is left out is checked with its default); only partition (n) and low walls can be demolished; a window is not in a low wall; a room's mat is a key of materials; a room polygon has an area of at least 0.01 m² and does not cross itself; the plan is not larger than 100 × 100 m.",
+  "type": "object",
+  "required": ["schemaVersion", "id", "name", "units", "walls", "openings", "rooms", "materials", "furniture"],
+  "properties": {
+    "schemaVersion": { "const": 2 },
+    "id": { "$ref": "#/$defs/id" },
+    "name": { "type": "string" },
+    "units": { "const": "mm" },
+    "locale": { "type": "string" },
+    "ceilingHeight": { "type": "number", "minimum": 2000, "maximum": 6000 },
+    "walls": { "type": "array", "maxItems": 2000, "items": { "$ref": "#/$defs/wall" } },
+    "openings": { "type": "array", "maxItems": 2000, "items": { "$ref": "#/$defs/opening" } },
+    "rooms": { "type": "array", "maxItems": 500, "items": { "$ref": "#/$defs/room" } },
+    "materials": { "type": "object", "additionalProperties": { "$ref": "#/$defs/material" } },
+    "furniture": { "type": "array", "maxItems": 5000, "items": { "$ref": "#/$defs/furniture" } },
+    "measurements": { "type": "array", "items": { "$ref": "#/$defs/measurement" } },
+    "dimensions": { "type": "array", "items": { "$ref": "#/$defs/dimensionChain" } },
+    "costEstimate": { "$ref": "#/$defs/costEstimate" }
+  },
+  "$defs": {
+    "id": { "type": "string", "minLength": 1 },
+    "point": { "type": "array", "prefixItems": [{ "type": "number" }, { "type": "number" }], "minItems": 2, "maxItems": 2 },
+    "wall": {
+      "type": "object",
+      "description": "a and b are the end points of the centre line. The wall body extends thickness / 2 on each side.",
+      "required": ["id", "type", "a", "b", "thickness"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "type": { "enum": ["e", "b", "n", "low"], "description": "e exterior, b bearing, n partition, low low wall." },
+        "a": { "$ref": "#/$defs/point" },
+        "b": { "$ref": "#/$defs/point" },
+        "thickness": { "type": "number", "minimum": 20, "maximum": 1000 },
+        "demolished": { "type": "boolean" }
+      }
+    },
+    "opening": {
+      "type": "object",
+      "description": "offset is the distance from the wall's a end to the start of the opening, along the wall; width is the length along the wall.",
+      "required": ["id", "type", "wallId", "offset", "width"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "type": { "enum": ["window", "door", "sliding-door", "hole"] },
+        "wallId": { "type": "string" },
+        "offset": { "type": "number", "minimum": 0 },
+        "width": { "type": "number", "exclusiveMinimum": 0 },
+        "name": { "type": "string" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "window" } }, "required": ["type"] },
+          "then": { "properties": { "sill": { "type": "number", "minimum": 0 }, "head": { "type": "number" } } }
+        },
+        {
+          "if": { "properties": { "type": { "const": "door" } }, "required": ["type"] },
+          "then": {
+            "required": ["hinge", "swing"],
+            "properties": {
+              "hinge": { "enum": ["start", "end"], "description": "start: the hinge is at offset; end: at offset + width." },
+              "swing": { "enum": ["left", "right"], "description": "The side of the wall, seen from a to b, that the door opens to." },
+              "head": { "type": "number", "minimum": 1800 },
+              "entry": { "type": "boolean" }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "type": { "enum": ["sliding-door", "hole"] } }, "required": ["type"] },
+          "then": { "properties": { "head": { "type": "number", "minimum": 1800 } } }
+        }
+      ]
+    },
+    "room": {
+      "type": "object",
+      "required": ["id", "name", "mat", "poly"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "name": { "type": "string" },
+        "mat": { "type": "string", "description": "A key of materials." },
+        "poly": { "type": "array", "minItems": 3, "items": { "$ref": "#/$defs/point" } },
+        "at": { "$ref": "#/$defs/point" },
+        "counted": { "type": "boolean" }
+      }
+    },
+    "material": {
+      "type": "object",
+      "required": ["name", "sw"],
+      "properties": { "name": { "type": "string" }, "sw": { "type": "string", "description": "Swatch colour." } }
+    },
+    "furniture": {
+      "type": "object",
+      "required": ["id", "type", "name", "cx", "cy", "w", "d", "rot"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "type": { "type": "string" },
+        "name": { "type": "string" },
+        "cx": { "type": "number" },
+        "cy": { "type": "number" },
+        "w": { "type": "number", "exclusiveMinimum": 0 },
+        "d": { "type": "number", "exclusiveMinimum": 0 },
+        "rot": { "type": "number" },
+        "color": { "type": "string" }
+      }
+    },
+    "measurement": {
+      "type": "object",
+      "required": ["id", "a", "b"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "a": { "$ref": "#/$defs/xy" },
+        "b": { "$ref": "#/$defs/xy" }
+      }
+    },
+    "xy": {
+      "type": "object",
+      "required": ["x", "y"],
+      "properties": { "x": { "type": "number" }, "y": { "type": "number" } }
+    },
+    "dimensionChain": {
+      "type": "object",
+      "required": ["horizontal", "at", "start", "segments"],
+      "properties": {
+        "horizontal": { "type": "boolean" },
+        "at": { "type": "number" },
+        "start": { "type": "number" },
+        "segments": { "type": "array", "items": { "type": "number" } }
+      }
+    },
+    "costEstimate": {
+      "type": "object",
+      "properties": {
+        "furniturePrices": { "$ref": "#/$defs/prices" },
+        "materialPrices": { "$ref": "#/$defs/prices" },
+        "wastePercent": { "type": "number", "minimum": 0, "maximum": 100 }
+      }
+    },
+    "prices": {
+      "type": "object",
+      "additionalProperties": { "anyOf": [{ "type": "null" }, { "type": "number", "minimum": 0 }] }
+    }
+  }
+}

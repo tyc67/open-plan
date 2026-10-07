@@ -219,19 +219,29 @@ One validator is used for saved documents at load, for imports, by the CLI and M
     - Enums: wall `type` is `e`, `b`, `n` or `low`; opening `type` is `window`, `door`, `sliding-door` or `hole`; door `hinge` is `start` or `end`; door `swing` is `left` or `right`; `units` is `mm`.
     - Walls: `a` and `b` are different; `thickness` is 20–1000; **the wall is horizontal or vertical** (this phase only, code `wall-not-axis-aligned`).
     - Openings: `wallId` exists; `offset ≥ 0`, `width > 0`, `offset + width ≤` wall length; no overlap with other openings in the same wall.
-    - Heights: the ranges in A2.
+    - Heights: the ranges in A2. A height that is left out is checked with its default, so the normalized plan gives the same result as its input.
+    - Walls: only `n` and `low` walls can be `demolished` (code `wall-not-demolishable`).
     - Rooms: `mat` exists in `materials`; the polygon has at least 3 distinct points, an area larger than 0.01 m², and no self-crossing.
     - Ids are unique in each list.
     - Size: the plan is not larger than 100 × 100 m; at most 2,000 walls, 2,000 openings, 500 rooms and 5,000 furniture items.
 - **Two classes of rule:**
     - **Errors that block rendering** are errors for every source and every version: missing or wrong-type fields, numbers that are not finite, unknown enums, duplicate ids, a `wallId` that does not exist, a zero-length wall, thickness out of range, an opening outside its wall length, a room polygon with fewer than 3 points.
-    - **Tolerable issues** can be shown and edited safely: self-crossing or very small room polygons, overlapping openings in one wall, a room `mat` with no material (drawn with a default material), heights out of range (drawn clamped), a plan larger than the size limits, a window in a `low` wall (its glass stands above the low wall).
+    - **Tolerable issues** can be shown and edited safely: self-crossing or very small room polygons, overlapping openings in one wall, a room `mat` with no material (drawn with a default material), heights out of range (drawn clamped), a plan larger than the size limits, a window in a `low` wall (its glass stands above the low wall), a demolished bearing or exterior wall (drawn as demolished; the editor can restore it, but not demolish it again).
 - **Policy by source, not by version:**
     - **Saved plans** (localStorage, or the file in `serve`): tolerable issues are **warnings**, in v1 and in v2, so a plan that loaded before a save also loads after it. Errors that block rendering follow the H2 path: the data is kept in the recovery copy and the plan does not open.
     - **Import, CLI `validate` and MCP tools:** tolerable issues are **errors**. The agent or the user must correct them.
 - **The migration repairs nothing silently.** It only changes the format and reports what it found.
 - **Schema file:** `docs/open-plan.schema.json` covers the **structural** rules (fields, types, enums, ranges of single values). Rules that need more than one value (references, overlap, polygon crossing, opening inside the wall length) are **semantic**. The schema description lists them, and only the validator checks them.
 - **Two test sets:** structural fixtures, where the schema and the validator must give the same pass or fail; and semantic fixtures, which pass the schema and must fail the validator with the expected `code` and `path`.
+
+**Implementation (B2):**
+
+- **Core:** `validatePlan(input, source)` in `packages/core/src/validate.ts`, with `source` `saved` or `import`. It collects every issue, not only the first. `TOLERABLE_CODES` lists the tolerable codes; every other code blocks rendering. `validateSharedFields` checks the shared fields of a v1 plan before migration. `checkPlanV2` is removed.
+- **Size:** measured on wall centre lines, room points and furniture boxes, so a 100 × 100 m plan between wall centre lines is not too large.
+- **Unknown fields** are allowed and kept, in the schema and in the validator.
+- **Drawing tolerable issues:** opening heights are drawn clamped (`effectiveOpeningHeights`): a window to 0 ≤ sill ≤ head ≤ ceiling, other openings to 1800 ≤ head ≤ ceiling. The stored values are kept.
+- **Editor:** a saved plan with warnings opens with a notice; the plan panel lists the warnings of the open plan (checked after each change) and, after a load error, the errors of the saved data. Each message ends with the raw path. The first 20 are listed, then the count.
+- **Checks:** `packages/core/test/validate.test.ts` (structural and semantic fixtures, with the schema compiled by Ajv) and `tools/checks/validation.mjs` (the saved policy in the browser).
 
 ### B3. Import, schema and agent prompt
 

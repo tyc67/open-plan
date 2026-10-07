@@ -1,7 +1,7 @@
-import { lazy, Suspense, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import ErrorBoundary from '../ErrorBoundary.jsx';
 import { createId } from './ids.js';
-import { fitBounds, planGeometry } from 'open-plan-core';
+import { fitBounds, planGeometry, validatePlan } from 'open-plan-core';
 import { RotateCw, Trash2 } from 'lucide-react';
 import WorkspaceShell from '../workspace/WorkspaceShell.jsx';
 import { createDocument, createEmptyDocument } from './document.js';
@@ -9,7 +9,7 @@ import { backupBeforeReplace, loadDocument, preserveUnreadableDocument, replaced
 import { LIB } from './seed.js';
 import CostEstimate from './CostEstimate.jsx';
 import SnapGuides from './SnapGuides.jsx';
-import WallProperties, { canDemolish } from './WallProperties.jsx';
+import WallProperties, { canToggleDemolition } from './WallProperties.jsx';
 import FurnitureAppearance from './FurnitureAppearance.jsx';
 import FloorPatterns, { RoomPatterns, roomFloorFill } from './FloorPatterns.jsx';
 import FurnitureSymbol from './FurnitureSymbol.jsx';
@@ -27,11 +27,18 @@ import usePlanViewport from './usePlanViewport.js';
 const FloorPlan3D = lazy(() => import('./FloorPlan3D.jsx'));
 const NO_FURNITURE_LABEL =new Set(['plant','floorlamp','sidetable','barstool','beanbag']);
 
+// A saved plan with tolerable issues opens with a notice; the issues are listed in the plan panel.
+const warningNotice=(count,prefix)=>({tone:'warning',text:`${prefix}這個平面圖有 ${count} 個需要注意的地方，可以照常編輯；清單在「平面圖設定」。`,actions:[]});
 function initialState() {
-  try { return { doc: loadDocument() || createDocument(), error: '' }; }
+  try {
+    const loaded = loadDocument();
+    if (!loaded) return { doc: createDocument(), error: '', loadErrors: [], notice: null };
+    return { doc: loaded.plan, error: '', loadErrors: [], notice: loaded.warnings.length ? warningNotice(loaded.warnings.length, '') : null };
+  }
   catch (error) {
     const kept = preserveUnreadableDocument();
-    return { doc: createDocument(), error: `無法載入已儲存的平面圖：${error.message}。${kept ? '原始資料已另存備份；' : '原始資料未能備份；'}自動儲存已暫停，按「儲存到此裝置」會覆寫並恢復自動儲存。` };
+    return { doc: createDocument(), loadErrors: error.issues || [], notice: null,
+      error: `無法載入已儲存的平面圖：${error.message}。${kept ? '原始資料已另存備份；' : '原始資料未能備份；'}自動儲存已暫停，按「儲存到此裝置」會覆寫並恢復自動儲存。` };
   }
 }
 export default function FloorPlanEditor() {
@@ -108,7 +115,7 @@ export default function FloorPlanEditor() {
   });
   const wall=doc.walls.find(w=>w.id===selectedWall);
   function selectWall(id){setSelected(null);setSelectedRoom(null);setSelectedMeasurement(null);setSelectedWall(id);if(id)setSelectionRequest(value=>value+1);}
-  function toggleDemolition(){if(wall&&canDemolish(wall))commit({...doc,walls:doc.walls.map(w=>w.id===wall.id?{...w,demolished:!w.demolished}:w)});}
+  function toggleDemolition(){if(wall&&canToggleDemolition(wall))commit({...doc,walls:doc.walls.map(w=>w.id===wall.id?{...w,demolished:!w.demolished}:w)});}
   const room=doc.rooms.find(r=>r.id===selectedRoom);
   function selectRoom(id){setSelectedWall(null);setSelectedMeasurement(null);setSelected(null);setSelectedRoom(id);if(id)setSelectionRequest(value=>value+1);}
   function patchRoom(values){if(values.name&&layers.locked.roomNames)return;if(room)commit({...doc,rooms:doc.rooms.map(r=>r.id===room.id?{...r,...values}:r)});}
@@ -312,16 +319,20 @@ export default function FloorPlanEditor() {
   function restorePrevious() {
     const current=settleEditor(),previous=replacedDocument();
     if(!previous){setCanRestore(false);setReplaceNotice({tone:'error',text:'找不到上一個平面圖的備份，或備份已損壞。',actions:[]});return;}
-    clearSelection();commit(previous,current);
-    setReplaceNotice({tone:'info',text:'已復原上一個平面圖。這一步也可以用「復原」取消。',actions:[['復原上一個平面圖',restorePrevious]]});
+    clearSelection();commit(previous.plan,current);
+    const count=previous.warnings.length;
+    setReplaceNotice({tone:count?'warning':'info',text:`已復原上一個平面圖。這一步也可以用「復原」取消。${count?`這個平面圖有 ${count} 個需要注意的地方，清單在「平面圖設定」。`:''}`,actions:[['復原上一個平面圖',restorePrevious]]});
   }
   const [canRestore,setCanRestore]=useState(()=>!!replacedDocument());
-  const [replaceNotice,setReplaceNotice]=useState(null);
+  const [replaceNotice,setReplaceNotice]=useState(initial.notice);
+  // Tolerable issues of the open plan, checked again after each change, so the list is never out of date.
+  const planWarnings=useMemo(()=>validatePlan(doc,'saved').warnings,[doc]);
   const planActions={
     onNewPlan:()=>replacePlan(createEmptyDocument(),'已建立新的空白平面圖。上一個平面圖已備份。'),
     onLoadSample:()=>replacePlan(createDocument(),'已載入範例公寓。上一個平面圖已備份。'),
     onRestorePrevious:restorePrevious,canRestore,
     notice:replaceNotice,onDismissNotice:()=>setReplaceNotice(null),
+    warnings:planWarnings,loadErrors:initial.loadErrors,
   };
   return <WorkspaceShell planActions={planActions} unit={unit} onUnit={setUnit} doc={doc} status={tool==='measure'&&view==='2d'?'點選兩點或拖曳測量 · Shift 鎖定水平／垂直 · Esc 取消':status} view={view} onView={setView} tool={spacePan?'pan':tool} onTool={setTool}
     selected={selected} selectedRoom={room?.id} selectedWall={wall?.id} selectionRequest={selectionRequest} history={history} onSelect={selectFurniture} onRestore={snapshot=>{swapPlanGeneration();commit(snapshot);}}

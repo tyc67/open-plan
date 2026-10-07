@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { PlanFormatError, checkPlanV2, migrateV1, planGeometry } from '../src/index.js';
+import { migrateV1, planGeometry } from '../src/index.js';
 import type { DoorV2, PlanV1, PlanV2 } from '../src/index.js';
 import sampleJson from './fixtures/sample-v1.json' with { type: 'json' };
 
@@ -74,24 +74,4 @@ describe('planGeometry on continuous walls', () => {
     expect(geometry.solids).toEqual([{ wallId: 'w1', type: 'e', rect: [0, 0, 8000, 200], demolished: true }]);
     expect(geometry.openings).toEqual([]);
   });
-});
-
-describe('checkPlanV2', () => {
-  it('accepts the migrated sample', () => expect(() => checkPlanV2(sampleV2())).not.toThrow());
-
-  const expectError = (change: (plan: any) => void, code: string, path: string) => {
-    const plan = sampleV2();
-    change(plan);
-    let error: unknown;
-    try { checkPlanV2(plan); } catch (e) { error = e; }
-    expect(error).toBeInstanceOf(PlanFormatError);
-    expect(error).toMatchObject({ code, path });
-  };
-  it('rejects a missing wall reference', () => expectError(p => { p.openings[0].wallId = 'nope'; }, 'wall-missing', 'openings[0].wallId'));
-  it('rejects an opening past the wall end', () => expectError(p => { p.openings[0].width += 1; }, 'opening-outside-wall', 'openings[0].width'));
-  it('rejects a diagonal wall', () => expectError(p => { p.walls[0].b = [p.walls[0].b[0] + 1, p.walls[0].b[1] + 1]; }, 'wall-not-axis-aligned', 'walls[0]'));
-  it('rejects a thickness out of range', () => expectError(p => { p.walls[0].thickness = 5; }, 'thickness-out-of-range', 'walls[0].thickness'));
-  it('rejects a window without a sill', () => expectError(p => { delete p.openings[0].sill; }, 'height-invalid', 'openings[0].sill'));
-  it('rejects an unknown door swing', () => expectError(p => { p.openings[12].swing = 'up'; }, 'door-swing-invalid', 'openings[12].swing'));
-  it('rejects duplicate opening ids', () => expectError(p => { p.openings[1].id = p.openings[0].id; }, 'id-duplicate', 'openings[1].id'));
 });

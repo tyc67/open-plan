@@ -2,7 +2,7 @@
 // This module is self-contained; ignored reference/donor directories are not needed at runtime.
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
-import { effectiveCeilingHeight, planGeometry } from 'open-plan-core';
+import { effectiveCeilingHeight, effectiveOpeningHeights, planGeometry } from 'open-plan-core';
 import { wx, wz, mm } from './coordinates.js';
 
 export function createModelFactory(renderer, environment) {
@@ -746,9 +746,11 @@ function buildArch(){
 
 
 function architecture(doc, cut, bearing=false) {
-  ROOMS = doc.rooms; CEILING = M(effectiveCeilingHeight(doc));
-  // Solid wall parts and visible openings come from the v2 data (walls minus their openings).
-  const geometry = planGeometry(doc);
+  const ceiling = effectiveCeilingHeight(doc);
+  ROOMS = doc.rooms; CEILING = M(ceiling);
+  // Solid wall parts and visible openings come from the v2 data (walls minus their openings). Heights out of range
+  // are tolerable issues: the stored values are kept, and drawn clamped to the A2 ranges.
+  const shapes = planGeometry(doc), geometry = { ...shapes, openings: shapes.openings.map(o => ({ ...o, ...effectiveOpeningHeights(o, ceiling) })) };
   WALLS = geometry.solids.map(s => [...s.rect, s.type, s.wallId, s.demolished]);
   WINS = geometry.openings.filter(o => o.type === 'window');
   DOORS = geometry.openings.filter(o => o.type === 'door');
