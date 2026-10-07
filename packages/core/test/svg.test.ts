@@ -29,6 +29,13 @@ describe('2D SVG drawing (roadmap C1)', () => {
     const bare = renderPlanSvg(sample, { labels: false, furniture: false });
     expect([bare.includes('data-layer="labels"'), bare.includes('data-layer="furniture"')]).toEqual([false, false]);
   });
+  it('text: false removes every text element and keeps everything else, also the dimension lines', () => {
+    const options = { grid: true, dimensions: true }, full = renderPlanSvg(sample, options), bare = renderPlanSvg(sample, { ...options, text: false });
+    expect([count(full, /<text /g) > 0, count(bare, /<text /g), bare.includes('data-layer="labels"')]).toEqual([true, 0, false]);
+    const withoutText = full.replace(/<text [^>]*>[^<]*<\/text>/g, '').replace(/\n<g data-layer="labels"[^\n]*<\/g>/, '');
+    expect(bare).toBe(withoutText);
+    expect(count(bare, /<line /g)).toBe(count(full, /<line /g));
+  });
   it('draws a demolished wall dashed, and escapes text', () => {
     const plan = { ...sample, walls: sample.walls.map(w => w.type === 'n' ? { ...w, demolished: true } : w), rooms: [{ ...sample.rooms[0], name: 'A <B> & "C"' }] };
     const svg = renderPlanSvg(plan);

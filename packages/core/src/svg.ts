@@ -18,6 +18,11 @@ export interface SvgOptions {
   labels?: boolean;
   /** Furniture outlines (default on). */
   furniture?: boolean;
+  /**
+   * Text (default on). `false` removes every text element (room names, areas, dimension numbers) and keeps the
+   * dimension lines: a geometry-only image that does not depend on the installed fonts.
+   */
+  text?: boolean;
 }
 
 const WALL_FILL: Record<WallType, string> = { e: '#2f3640', b: '#1b1f24', n: '#7b8794', low: '#b8c2cc' };
@@ -35,14 +40,19 @@ function boxCentre(poly: Point[]): Point {
   return [(Math.min(...xs) + Math.max(...xs)) / 2, (Math.min(...ys) + Math.max(...ys)) / 2];
 }
 
+/** The plan area and the image size in px that `renderPlanSvg` uses for these options; a caller can check the size first. */
+export function planImageSize(plan: PlanV2, options: Pick<SvgOptions, 'crop' | 'width'> = {}): { crop: Rect; width: number; height: number } {
+  const crop = options.crop ?? fitBounds(plan), width = options.width ?? 1200;
+  return { crop, width, height: Math.max(1, Math.round(width * (crop[3] - crop[1]) / (crop[2] - crop[0]))) };
+}
+
 /**
  * The plan as a 2D SVG string (roadmap C1): rooms, walls, openings, labels and furniture outlines. It is a simpler
  * drawing than the editor, for checking a plan, not for presentation. The same plan and options always give the same
  * text. Coordinates are plan millimetres; line widths and text sizes follow the crop, so they look the same at any size.
  */
 export function renderPlanSvg(plan: PlanV2, options: SvgOptions = {}): string {
-  const [x0, y0, x1, y1] = options.crop ?? fitBounds(plan), w = x1 - x0, h = y1 - y0;
-  const width = options.width ?? 1200, height = Math.max(1, Math.round(width * h / w));
+  const { crop: [x0, y0, x1, y1], width, height } = planImageSize(plan, options), w = x1 - x0, h = y1 - y0;
   const px = w / width;                                                   // mm per image pixel
   const font = Math.max(w, h) / 70, thin = `stroke-width="${n(px)}"`;
   const out: string[] = [];
@@ -96,7 +106,8 @@ export function renderPlanSvg(plan: PlanV2, options: SvgOptions = {}): string {
       parts.push(line(at(d.start), at(d.start + d.segments.reduce((s, v) => s + v, 0)), ''), tick(pos));
       for (const segment of d.segments) {
         const centre = pos + segment / 2, label: Point = d.horizontal ? [centre, d.at - font * 0.6] : [d.at - font * 0.6, centre];
-        parts.push(tick(pos + segment), text(label, font * 0.6, n(segment), `stroke="none" fill="#7d7160"${d.horizontal ? '' : ` transform="rotate(-90 ${pt(label)})"`}`));
+        parts.push(tick(pos + segment));
+        if (options.text !== false) parts.push(text(label, font * 0.6, n(segment), `stroke="none" fill="#7d7160"${d.horizontal ? '' : ` transform="rotate(-90 ${pt(label)})"`}`));
         pos += segment;
       }
     }
@@ -111,7 +122,7 @@ export function renderPlanSvg(plan: PlanV2, options: SvgOptions = {}): string {
     out.push(`<g data-layer="grid" stroke="#486581" stroke-opacity="0.35" ${thin}>${lines.join('')}</g>`);
   }
 
-  if (options.labels !== false) out.push(`<g data-layer="labels" fill="#1f2933">${plan.rooms.map(r => {
+  if (options.labels !== false && options.text !== false) out.push(`<g data-layer="labels" fill="#1f2933">${plan.rooms.map(r => {
     const at = r.at ?? boxCentre(r.poly);
     return text(at, font, r.name) + text([at[0], at[1] + font * 1.2], font * 0.75, `${roomArea(r.poly).toFixed(1)} m²`, 'fill="#52606d"');
   }).join('')}</g>`);

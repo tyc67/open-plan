@@ -16,10 +16,16 @@ const USAGE = `Usage: open-plan <command> [options]
   migrate <old.json> <plan.json> [--replace]
                                          Convert a schema version 1 file to version 2
   apply <plan.json> <commands.json>      Apply { "expectedRevision": "...", "commands": [...] }
+  render <plan.json> <out.png> [--crop x0,y0,x1,y1] [--width px] [--grid] [--dimensions] [--no-text]
+                                         Draw the plan in 2D as a PNG, to compare with the source image
   backups <plan.json>                    List the backups of a plan
   restore <plan.json> <backup-name>      Restore a backup (the current file is backed up first)
 
-Options: --json (machine-readable output), --help`;
+Options: --json (machine-readable output), --help
+
+render: --crop is a plan area in mm (default: the whole plan); --width is the image width in px (default 1200).
+The image is at most 8000 px on each side and 32 million px. --grid adds a 1 m grid; --dimensions adds the
+dimension chains; --no-text leaves out all text.`;
 
 const EXIT: Record<string, number> = {
   VALIDATION_FAILED: 1, COMMANDS_REFUSED: 1, DESTINATION_EXISTS: 1, NOT_VERSION_1: 1, NOT_VERSION_2: 1, REVISION_REQUIRED: 1,
@@ -27,7 +33,8 @@ const EXIT: Record<string, number> = {
   JSON_INVALID: 1, FILE_NOT_FOUND: 1, USAGE: 2, REVISION_CONFLICT: 3, LOCK_TIMEOUT: 4, LOCK_STALE: 4, LOCK_UNCERTAIN: 4,
   IO_ERROR: 5, BACKUP_FAILED: 5,
 };
-const ARITY: Record<string, number> = { schema: 0, validate: 1, info: 1, new: 1, migrate: 2, apply: 2, backups: 1, restore: 2 };
+const ARITY: Record<string, number> = { schema: 0, validate: 1, info: 1, new: 1, migrate: 2, apply: 2, render: 2, backups: 1, restore: 2 };
+const RENDER_OPTIONS = ['crop', 'width', 'grid', 'dimensions', 'no-text'] as const;
 
 const issueLine = (i: Issue & { commandIndex?: number }) =>
   `  - ${i.commandIndex !== undefined ? `[command ${i.commandIndex}] ` : ''}${i.path}: ${i.code}${Object.keys(i.params).length ? ` ${JSON.stringify(i.params)}` : ''}`;
@@ -51,6 +58,7 @@ function printText(command: string, result: Record<string, any>) {
       out.push(`${result.name}: ${s.walls} walls, ${s.openings} openings, ${s.rooms} rooms, ${s.furniture} furniture; ${s.width.toFixed(2)} × ${s.depth.toFixed(2)} m`);
       for (const r of result.rooms) out.push(`  ${r.id}  ${r.name}  ${r.area.toFixed(2)} m²${r.counted ? '' : ' (not counted)'}`);
     }
+    if (command === 'render') out.push(`Wrote ${result.output} (${result.width} × ${result.height} px).`);
     if (result.revision) out.push(`Revision: ${result.revision}`);
     if (result.backup) out.push(`Backup: ${result.backup}`);
     for (const n of result.notes ?? []) out.push(`  note [command ${n.commandIndex}] ${n.code} ${JSON.stringify(n.params)}`);
@@ -64,7 +72,8 @@ function printText(command: string, result: Record<string, any>) {
 async function main(argv: string[]): Promise<number> {
   let parsed;
   try {
-    parsed = parseArgs({ args: argv, allowPositionals: true, options: { json: { type: 'boolean' }, sample: { type: 'boolean' }, replace: { type: 'boolean' }, help: { type: 'boolean', short: 'h' } } });
+    parsed = parseArgs({ args: argv, allowPositionals: true, options: { json: { type: 'boolean' }, sample: { type: 'boolean' }, replace: { type: 'boolean' }, help: { type: 'boolean', short: 'h' },
+      crop: { type: 'string' }, width: { type: 'string' }, grid: { type: 'boolean' }, dimensions: { type: 'boolean' }, 'no-text': { type: 'boolean' } } });
   } catch (error) { process.stderr.write(`${(error as Error).message}\n\n${USAGE}\n`); return 2; }
   const { values, positionals: [command, ...args] } = parsed;
   if (values.help || !command) { process.stdout.write(`${USAGE}\n`); return command || values.help ? 0 : 2; }
@@ -75,7 +84,9 @@ async function main(argv: string[]): Promise<number> {
   };
   if (!(command in ARITY)) return fail('USAGE', `Unknown command "${command}".\n\n${USAGE}`);
   if (args.length !== ARITY[command]) return fail('USAGE', `${command} takes ${ARITY[command]} argument(s).\n\n${USAGE}`);
-  if ((values.sample && command !== 'new') || (values.replace && !['new', 'migrate'].includes(command))) return fail('USAGE', `Option not available for ${command}.`);
+  if ((values.sample && command !== 'new') || (values.replace && !['new', 'migrate'].includes(command)) ||
+    (command !== 'render' && RENDER_OPTIONS.some(o => values[o] !== undefined))) return fail('USAGE', `Option not available for ${command}.`);
+  const number = (text: string) => text.trim() === '' ? NaN : Number(text);
   try {
     const result: Record<string, any> =
       command === 'schema' ? await op.schema()
@@ -84,6 +95,11 @@ async function main(argv: string[]): Promise<number> {
       : command === 'new' ? await op.create(args[0], { sample: values.sample, replace: values.replace })
       : command === 'migrate' ? await op.migrate(args[0], args[1], { replace: values.replace })
       : command === 'apply' ? await op.apply(args[0], args[1])
+      : command === 'render' ? await op.render(args[0], args[1], {
+        crop: values.crop === undefined ? undefined : values.crop.split(',').map(number) as op.RenderOptions['crop'],
+        width: values.width === undefined ? undefined : number(values.width),
+        grid: values.grid, dimensions: values.dimensions, text: !values['no-text'],
+      })
       : command === 'backups' ? await op.backups(args[0])
       : await op.restore(args[0], args[1]);
     if (values.json) process.stdout.write(`${JSON.stringify(result)}\n`);

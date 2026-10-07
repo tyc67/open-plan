@@ -1,8 +1,10 @@
-import { readFile } from 'node:fs/promises';
+import { Resvg } from '@resvg/resvg-js';
 import {
-  applyCommands, createEmptyPlan, createSamplePlan, migrateV1Document, roomArea, summarizePlan, validatePlan,
-  type CommandIssue, type CommandNote, type Issue, type MigrationNote, type PlanV2,
+  applyCommands, createEmptyPlan, createSamplePlan, migrateV1Document, planImageSize, renderPlanSvg, roomArea, summarizePlan, validatePlan,
+  type CommandIssue, type CommandNote, type Issue, type MigrationNote, type PlanV2, type Rect,
 } from 'open-plan-core';
+import schemaText from '../../../docs/open-plan.schema.json?raw';
+import formatText from '../../../docs/plan-format.md?raw';
 import {
   backupPath, canonicalPath, checkSingleLink, CliError, listBackups, parseJson, planText, pruneBackups, readBytes,
   replaceFile, revisionOf, writeBackup, type BackupInfo,
@@ -16,11 +18,9 @@ import { withLock, type LockOptions } from './lock.js';
  */
 export type Result<T> = ({ ok: true } & T | { ok: false; code: string; message: string; errors?: (Issue | CommandIssue)[]; [key: string]: unknown }) & { notices: string[] };
 
-const asset = (name: string) => readFile(new URL(`./assets/${name}`, import.meta.url), 'utf8');
-
-/** The JSON Schema and the short field description. */
+/** The JSON Schema and the short field description. Both are inside the built CLI, not read from the repository. */
 export async function schema(): Promise<Result<{ schema: unknown; description: string }>> {
-  return { ok: true, schema: JSON.parse(await asset('open-plan.schema.json')), description: await asset('plan-format.md'), notices: [] };
+  return { ok: true, schema: JSON.parse(schemaText), description: formatText, notices: [] };
 }
 
 interface Loaded { revision: string; schemaVersion: unknown; plan?: PlanV2; errors: Issue[]; warnings: Issue[]; report: MigrationNote[] }
@@ -58,6 +58,48 @@ export async function info(file: string): Promise<Result<{ revision: string; nam
     ok: true, revision: loaded.revision, name: plan.name, summary: summarizePlan(plan), warnings: loaded.warnings, notices: [],
     rooms: plan.rooms.map(r => ({ id: r.id, name: r.name, area: Math.round(roomArea(r.poly) * 100) / 100, counted: r.counted !== false })),
   };
+}
+
+export interface RenderOptions {
+  /** A plan area [x0, y0, x1, y1] in mm; default: the whole plan with its margin. */
+  crop?: Rect;
+  /** The image width in px; the height follows the crop. Each side is at most 8000 px, and the image at most 32 million px. */
+  width?: number;
+  grid?: boolean;
+  dimensions?: boolean;
+  /** `false`: no text, so the image does not depend on fonts (and no system fonts are loaded). */
+  text?: boolean;
+  /** Font files to use instead of the system fonts, and their family name (for tests with a fixed font). */
+  fonts?: { files: string[]; family: string };
+}
+
+const MAX_SIDE = 8000, MAX_PIXELS = 32_000_000;
+
+/**
+ * Draws a plan as a 2D PNG (roadmap C2b), so an agent can compare it with the source image. A plan with tolerable
+ * issues is drawn, with them as warnings; an error that blocks rendering refuses. The PNG replaces `out` atomically.
+ */
+export async function render(file: string, out: string, options: RenderOptions = {}): Promise<Result<{ revision: string; output: string; width: number; height: number; warnings: Issue[]; migrationReport: MigrationNote[] }>> {
+  const { crop, width = 1200 } = options;
+  if (!Number.isInteger(width) || width < 1 || width > MAX_SIDE) throw new CliError('USAGE', `The width must be a whole number of pixels from 1 to ${MAX_SIDE}.`);
+  if (crop && !(crop.length === 4 && crop.every(Number.isFinite) && crop[0] < crop[2] && crop[1] < crop[3])) throw new CliError('USAGE', 'The crop must be x0,y0,x1,y1 in mm with x0 < x1 and y0 < y1.');
+  const [plan, output] = [await canonicalPath(file, true), await canonicalPath(out, false)];
+  if (plan === output) throw new CliError('USAGE', 'The output file is the plan file. Give another name for the PNG.');
+  const loaded = await load(file, 'saved');
+  if (!loaded.plan) return { ok: false, code: 'VALIDATION_FAILED', message: `${loaded.errors.length} error(s) block rendering; run \`validate\`.`, errors: loaded.errors, revision: loaded.revision, notices: [] };
+  // The height follows the crop, so a narrow crop can ask for a very tall image: check the derived size before drawing.
+  const size = planImageSize(loaded.plan, { crop, width });
+  if (!(size.height <= MAX_SIDE && size.width * size.height <= MAX_PIXELS)) {
+    throw new CliError('USAGE', `The image would be ${size.width} × ${size.height} px; the limit is ${MAX_SIDE} px on each side and ${MAX_PIXELS / 1e6} million px. Use a smaller --width or a wider crop.`, { width: size.width, height: size.height });
+  }
+  const svg = renderPlanSvg(loaded.plan, { crop, width, grid: options.grid, dimensions: options.dimensions, text: options.text });
+  const font = options.fonts
+    ? { loadSystemFonts: false, fontFiles: options.fonts.files, defaultFontFamily: options.fonts.family, sansSerifFamily: options.fonts.family }
+    : { loadSystemFonts: options.text !== false };
+  const image = new Resvg(svg, { font }).render();
+  await replaceFile(output, image.asPng());
+  const notices = loaded.schemaVersion === 1 ? ['The file is schema version 1; it was drawn through the migration. `migrate` converts it.'] : [];
+  return { ok: true, revision: loaded.revision, output, width: image.width, height: image.height, warnings: loaded.warnings, migrationReport: loaded.report, notices };
 }
 
 /** Resolves the plan path, takes its lock, and checks under the lock that the path still names the same single-link file. */

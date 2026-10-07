@@ -2,7 +2,7 @@
   "name": "open-plan-cli",
   "version": "0.1.0",
   "private": true,
-  "description": "Command line tools for Open Plan files: validate, migrate, apply commands, back up and restore. Temporary name until the package scope is chosen.",
+  "description": "Command line tools for Open Plan files: validate, migrate, apply commands, render, back up and restore. Temporary name until the package scope is chosen.",
   "type": "module",
   "bin": {
     "open-plan": "./dist/cli.js"
@@ -11,14 +11,20 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && node scripts/copy-assets.mjs",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "build": "pnpm --filter open-plan-core build && node scripts/build.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test:pack": "node scripts/pack-test.mjs"
   },
   "dependencies": {
-    "open-plan-core": "workspace:*"
+    "@resvg/resvg-js": "^2.6.2"
   },
   "devDependencies": {
     "@types/node": "^24.19.1",
+    "esbuild": "^0.28.2",
+    "open-plan-core": "workspace:*",
     "typescript": "^7.0.2"
+  },
+  "engines": {
+    "node": ">=22"
   }
 }
