@@ -7,3 +7,8 @@ export * from './validate.js';
 export * from './heights.js';
 export * from './bounds.js';
 export * from './view-frame.js';
+export * from './ids.js';
+export * from './rooms.js';
+export * from './v1-document.js';
+export * from './sample.js';
+export * from './commands/index.js';

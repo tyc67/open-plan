@@ -6,6 +6,7 @@ export interface MigrationNote {
   message: string;
   openingId?: string;
   wallId?: string;
+  roomId?: string;
 }
 export interface MigrationResult { plan: PlanV2; report: MigrationNote[] }
 

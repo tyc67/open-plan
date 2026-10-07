@@ -1,0 +1,19 @@
+import type { Material, PlanV2 } from '../types.js';
+import type { PlanCommand } from './types.js';
+import { readFields, refuse, type Step } from './support.js';
+
+function setPlanName(plan: PlanV2, c: Extract<PlanCommand, { op: 'set_plan_name' }>): Step {
+  readFields(c, { required: { name: 'string' } });
+  return { plan: { ...plan, name: c.name } };
+}
+
+/** Creates or replaces one material by its key. Rooms refer to it by the key, so they keep using it. */
+function setMaterial(plan: PlanV2, c: Extract<PlanCommand, { op: 'set_material' }>): Step {
+  readFields(c, { required: { key: 'id', name: 'string', sw: 'string' }, optional: { price: 'number' } });
+  if (c.price !== undefined && c.price < 0) refuse('price', 'value-out-of-range', { min: 0, value: c.price });
+  const material: Material = { name: c.name, sw: c.sw, ...(c.price !== undefined ? { price: c.price } : {}) };
+  const replaced = Object.hasOwn(plan.materials, c.key);
+  return { plan: { ...plan, materials: { ...plan.materials, [c.key]: material } }, notes: [{ code: replaced ? 'material-replaced' : 'material-created', params: { key: c.key } }] };
+}
+
+export const PLAN_COMMANDS = { set_plan_name: setPlanName, set_material: setMaterial } as const;

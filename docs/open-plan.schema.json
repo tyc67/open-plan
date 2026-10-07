@@ -34,7 +34,8 @@
         "a": { "$ref": "#/$defs/point" },
         "b": { "$ref": "#/$defs/point" },
         "thickness": { "type": "number", "minimum": 20, "maximum": 1000 },
-        "demolished": { "type": "boolean" }
+        "demolished": { "type": "boolean" },
+        "name": { "type": "string" }
       }
     },
     "opening": {
@@ -87,7 +88,11 @@
     "material": {
       "type": "object",
       "required": ["name", "sw"],
-      "properties": { "name": { "type": "string" }, "sw": { "type": "string", "description": "Swatch colour." } }
+      "properties": {
+        "name": { "type": "string" },
+        "sw": { "type": "string", "description": "Swatch colour." },
+        "price": { "type": "number", "minimum": 0, "description": "Price per m², for the cost estimate." }
+      }
     },
     "furniture": {
       "type": "object",

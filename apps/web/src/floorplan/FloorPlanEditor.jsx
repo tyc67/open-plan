@@ -1,14 +1,12 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import ErrorBoundary from '../ErrorBoundary.jsx';
-import { createId } from './ids.js';
-import { fitBounds, planGeometry, validatePlan } from 'open-plan-core';
+import { createEmptyPlan, createId, createSamplePlan, fitBounds, planGeometry, roomArea, validatePlan } from 'open-plan-core';
 import { RotateCw, Trash2 } from 'lucide-react';
 import WorkspaceShell from '../workspace/WorkspaceShell.jsx';
-import { createDocument, createEmptyDocument } from './document.js';
 import { backupBeforeReplace, loadDocument, preserveUnreadableDocument, replacedDocument, saveDocument } from './storage.js';
 import { readImportFile } from './planFile.js';
 import { AGENT_PROMPT } from './agentPrompt.js';
-import { LIB } from './seed.js';
+import { LIB } from './furnitureLibrary.js';
 import CostEstimate from './CostEstimate.jsx';
 import SnapGuides from './SnapGuides.jsx';
 import WallProperties, { canToggleDemolition } from './WallProperties.jsx';
@@ -20,7 +18,6 @@ import { snapFurniture } from './wallSnapping.js';
 import { loadLayers, saveLayers } from './layers.js';
 import Measurements, { snapMeasurement } from './Measurements.jsx';
 import RoomProperties from './RoomProperties.jsx';
-import { roomArea } from './roomGeometry.js';
 import DimensionLines from './DimensionLines.jsx';
 import { formatLength, unitFactor } from './units.js';
 import useTouchNavigation from './useTouchNavigation.js';
@@ -35,12 +32,12 @@ function initialState() {
   try {
     const loaded = loadDocument();
     // A new user starts with an empty plan; the canvas then offers Import and Load sample apartment (roadmap B3).
-    if (!loaded) return { doc: createEmptyDocument(), error: '', loadErrors: [], notice: null };
+    if (!loaded) return { doc: createEmptyPlan(), error: '', loadErrors: [], notice: null };
     return { doc: loaded.plan, error: '', loadErrors: [], notice: loaded.warnings.length ? warningNotice(loaded.warnings.length, '') : null };
   }
   catch (error) {
     const kept = preserveUnreadableDocument();
-    return { doc: createEmptyDocument(), loadErrors: error.issues || [], notice: null,
+    return { doc: createEmptyPlan(), loadErrors: error.issues || [], notice: null,
       error: `無法載入已儲存的平面圖：${error.message}。${kept ? '原始資料已另存備份；' : '原始資料未能備份；'}自動儲存已暫停，按「儲存到此裝置」會覆寫並恢復自動儲存。` };
   }
 }
@@ -358,8 +355,8 @@ export default function FloorPlanEditor() {
   const planActions={
     onImportFile:importFile,importState,onConfirmImport:confirmImport,onCancelImport:closeImport,
     agentPrompt:AGENT_PROMPT,isEmpty:!doc.walls.length&&!doc.rooms.length&&!doc.furniture.length,
-    onNewPlan:()=>replacePlan(createEmptyDocument(),'已建立新的空白平面圖。上一個平面圖已備份。'),
-    onLoadSample:()=>replacePlan(createDocument(),'已載入範例公寓。上一個平面圖已備份。'),
+    onNewPlan:()=>replacePlan(createEmptyPlan(),'已建立新的空白平面圖。上一個平面圖已備份。'),
+    onLoadSample:()=>replacePlan(createSamplePlan(),'已載入範例公寓。上一個平面圖已備份。'),
     onRestorePrevious:restorePrevious,canRestore,
     notice:replaceNotice,onDismissNotice:()=>setReplaceNotice(null),
     warnings:planWarnings,loadErrors:initial.loadErrors,

@@ -83,10 +83,11 @@ const REPORT = {
   'sample-bay-holes-not-applicable': '沒有範例的凸窗牆，未加入凸窗開口',
   'sample-bay-holes-skipped': '有牆或開口和範例凸窗重疊，未加入凸窗開口',
   'sample-bay-hole-created': '已加入範例凸窗的開口（舊版只有固定的過梁）',
+  'room-polygon-corrected': '舊範例的空間外框和承重牆重疊，已改為沿牆面',
 };
 
 /** One migration note as zh-TW text with the ids it names, for example "開口 d1，牆 d1--wall：鉸鏈位置已移動". */
-export function reportMessage({ code, openingId, wallId, message }) {
-  const ids = [openingId && `開口 ${openingId}`, wallId && `牆 ${wallId}`].filter(Boolean).join('，');
+export function reportMessage({ code, openingId, wallId, roomId, message }) {
+  const ids = [roomId && `空間 ${roomId}`, openingId && `開口 ${openingId}`, wallId && `牆 ${wallId}`].filter(Boolean).join('，');
   return `${ids ? `${ids}：` : ''}${REPORT[code] ?? message}`;
 }

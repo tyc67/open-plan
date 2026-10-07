@@ -215,7 +215,11 @@ try {
   const focusInDialog = () => page.evaluate(() => !!document.activeElement?.closest('[role=dialog]'));
   const importButton = page.getByRole('button', { name: '匯入平面圖' }).first();
   await importButton.focus();
-  const [keyChooser] = await Promise.all([page.waitForEvent('filechooser'), page.keyboard.press('Enter')]);
+  const focusedLabel = () => page.evaluate(() => { const a = document.activeElement; return a?.getAttribute('aria-label') || a?.tagName || 'none'; });
+  const focusBefore = await focusedLabel();
+  const keyChooser = await Promise.all([page.waitForEvent('filechooser', { timeout: 5000 }), page.keyboard.press('Enter')]).then(([c]) => c, () => null);
+  check('keyboard: Enter on the focused 匯入 button opens the file chooser', !!keyChooser, `focus before Enter: ${focusBefore}, after: ${await focusedLabel()}`);
+  if (!keyChooser) throw new Error('no file chooser; the keyboard steps cannot continue');
   await keyChooser.setFiles(file('example.json', exampleText)); await dialog.waitFor();
   check('keyboard: focus starts in the dialog', await focusInDialog());
   let staysIn = true;

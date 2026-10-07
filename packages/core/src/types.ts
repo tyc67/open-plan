@@ -6,18 +6,48 @@ export type Rect = [number, number, number, number];
 /** `e` exterior, `b` bearing, `n` partition, `low` low wall. Only `n` and `low` can be demolished. */
 export type WallType = 'e' | 'b' | 'n' | 'low';
 
-/** Fields that v1 and v2 share and the migration copies unchanged. */
+/** A room. `poly` is the outline on the inside face of its walls. Rooms are not linked to walls in this phase. */
+export interface Room {
+  id: string;
+  name: string;
+  /** A key of `materials`. */
+  mat: string;
+  poly: Point[];
+  /** Label position. */
+  at?: Point;
+  /** `false`: not in the floor area. */
+  counted?: boolean;
+}
+
+/** A floor material. `sw` is the swatch colour. The sample also has a `price` per m². */
+export interface Material { name: string; sw: string; price?: number }
+
+/** A furniture item: centre `cx`, `cy`, size `w` × `d` (real size, never scaled), rotation `rot` in degrees. */
+export interface Furniture { id: string; type: string; name: string; cx: number; cy: number; w: number; d: number; rot: number; color?: string }
+
+export interface Measurement { id: string; a: { x: number; y: number }; b: { x: number; y: number } }
+
+/** A chain of dimension segments along x (`horizontal`) or y, drawn at `at` and starting at `start`. */
+export interface DimensionChain { horizontal: boolean; at: number; start: number; segments: number[] }
+
+export interface CostEstimate {
+  furniturePrices?: Record<string, number | null>;
+  materialPrices?: Record<string, number | null>;
+  wastePercent?: number;
+}
+
+/** Fields that v1 and v2 share and the migration copies unchanged. Unknown extra fields are allowed and kept. */
 export interface PlanCommon {
   id: string;
   name: string;
   units: 'mm';
   locale?: string;
-  rooms: unknown[];
-  materials: Record<string, unknown>;
-  furniture: unknown[];
-  measurements?: unknown[];
-  dimensions?: unknown[];
-  costEstimate?: unknown;
+  rooms: Room[];
+  materials: Record<string, Material>;
+  furniture: Furniture[];
+  measurements?: Measurement[];
+  dimensions?: DimensionChain[];
+  costEstimate?: CostEstimate;
 }
 
 // ---- Schema v1: walls and openings as rects. Walls stop at each opening. ----
@@ -41,6 +71,7 @@ export interface WallV2 {
   b: Point;
   thickness: number;
   demolished?: boolean;
+  name?: string;
 }
 
 interface OpeningBase {

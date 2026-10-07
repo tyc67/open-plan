@@ -119,6 +119,7 @@ function checkShared(plan: Obj, c: Collector, extent: Extent) {
     const at = `materials.${key}`;
     if (!isObject(m)) { c.add(at, 'type-invalid', { expected: 'object' }); continue; }
     c.field(m, 'name', at, 'string'); c.field(m, 'sw', at, 'string');
+    if (c.field(m, 'price', at, 'number', true) && (m.price as number) < 0) c.add(`${at}.price`, 'value-out-of-range', { min: 0, value: m.price });
   }
 
   if (c.field(plan, 'rooms', '$', 'array')) {
@@ -232,6 +233,7 @@ export function validatePlan(input: unknown, source: ValidationSource): Validati
     if (list.length > PLAN_LIMITS.walls) c.add('walls', 'too-many-items', { count: list.length, limit: PLAN_LIMITS.walls });
     for (const [w, , at] of c.items(list, 'walls')) {
       const typeOk = c.oneOf(w, 'type', at, WALL_TYPES);
+      c.field(w, 'name', at, 'string', true);
       const aOk = c.field(w, 'a', at, 'point'), bOk = c.field(w, 'b', at, 'point');
       let thicknessOk = c.field(w, 'thickness', at, 'number');
       if (thicknessOk && ((w.thickness as number) < THICKNESS_MIN || (w.thickness as number) > THICKNESS_MAX)) {

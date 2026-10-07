@@ -1,8 +1,5 @@
-import { validatePlan } from 'open-plan-core';
-import { validateDocumentV1 } from './document.js';
+import { checkDocumentV1, localizeLegacyNames, migrateV1Document, validatePlan } from 'open-plan-core';
 import { issueMessage } from './issueMessages.js';
-import { migrateV1Document } from './planFile.js';
-import { localizeDocument } from './locale.js';
 const KEY = 'open-plan:document:v1';
 const RECOVERY_KEY = 'open-plan:document:v1:recovery';
 // The last saved plan in schema v1, kept when it is migrated to v2 at load. It is never overwritten by v2 saves.
@@ -31,7 +28,7 @@ export function loadDocument() {
   let doc;
   try { doc = JSON.parse(raw); } catch { throw new PlanLoadError([{ path: '$', code: 'json-invalid', params: {} }]); }
   if (doc?.schemaVersion === 1) {
-    const v1 = validateDocumentV1(doc);
+    const v1 = checkDocumentV1(doc);
     if (!v1.ok) throw new PlanLoadError(v1.errors);
     // Keep the v1 data first; if it cannot be kept, do not migrate, so the next save cannot replace the only copy.
     localStorage.setItem(BEFORE_V2_KEY, raw);
@@ -44,7 +41,7 @@ export function loadDocument() {
     return { plan: checked, warnings };
   }
   const { plan, warnings } = checkSaved(doc);
-  return { plan: localizeDocument(plan), warnings };
+  return { plan: localizeLegacyNames(plan), warnings };
 }
 export function saveDocument(doc) { localStorage.setItem(KEY, JSON.stringify(doc)); }
 // Copies an unreadable plan aside before a later save can overwrite it.
@@ -72,6 +69,6 @@ export function replacedDocument() {
     const doc = JSON.parse(localStorage.getItem(REPLACED_KEY));
     if (!doc) return null;
     const result = validatePlan(doc, 'saved');
-    return result.ok ? { plan: localizeDocument(result.plan), warnings: result.warnings } : null;
+    return result.ok ? { plan: localizeLegacyNames(result.plan), warnings: result.warnings } : null;
   } catch { return null; }
 }

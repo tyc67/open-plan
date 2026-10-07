@@ -1,5 +1,5 @@
 import { formatLength } from './units.js';
-import { containsPoint, roomArea, roomPerimeter } from './roomGeometry.js';
+import { containsPoint, roomArea, roomPerimeter } from 'open-plan-core';
 
 export default function RoomProperties({nameLocked,room,doc,unit,onPatch,onSelectFurniture}) {
   const area=roomArea(room.poly),perimeter=roomPerimeter(room.poly);

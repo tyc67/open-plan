@@ -1,6 +1,11 @@
-import { LAUNDRY_POLYGON, CHILD_POLYGON } from './geometryMigration.js';
-// Apartment seed adapted from reference/floorplan-3d.html. Units: mm.
-const WALLS = [
+import { createId } from './ids.js';
+import { migrateV1 } from './migrate-v1.js';
+import type { DimensionChain, Furniture, Material, PlanV1, PlanV2, Point, Rect, Room } from './types.js';
+import { CHILD_POLYGON, LAUNDRY_POLYGON } from './v1-document.js';
+
+// The sample apartment, adapted from reference/floorplan-3d.html. Units: mm. It is defined in the v1 shape and
+// migrated, so there is one source for its geometry (roadmap A1).
+const WALLS: [number, number, number, number, string][] = [
   // 頂部外牆
   [1580,-240,2120,0,'b'],[1580,0,1820,300,'b'],[2120,-240,4580,0,'e'],[4580,-240,5140,0,'e'],
   [5760,-240,6050,0,'e'],[6050,-240,6600,0,'b'],[6360,0,6600,300,'b'],[6600,-240,9960,0,'e'],
@@ -28,7 +33,7 @@ const WALLS = [
   [6083,4600,6323,6610,'n'],[6323,6370,9960,6610,'n'],
 ];
 // 窗
-const WINS = [
+const WINS: Rect[] = [
   [5140,-240,5760,0],[1580,300,1820,3370],[-240,3370,1580,3610],[2180,3825,2420,4430],
   [10510,6370,12090,6610],[11850,6610,12090,9960],
   // 飄窗（主臥 / 子女房）
@@ -36,7 +41,7 @@ const WINS = [
   [10510,4110,11130,4210],[11030,4210,11130,5785],[10510,5785,11130,5885],
 ];
 // 平開門：洞口、鉸點、關閉方向、開啟方向、門寬
-const DOORS = [
+const DOORS: { name: string; rect: Rect; h: Point; c: Point; o: Point; len: number; entry?: boolean }[] = [
   {name:'小孩房門',rect:[4580,2400,4820,3280],h:[4580,3280],c:[0,-1],o:[-1,0],len:880},
   {name:'主臥門',rect:[6360,2400,6600,3280],h:[6600,3280],c:[0,-1],o:[1,0],len:880},
   {name:'主衛門',rect:[6360,1198,6600,1983],h:[6360,1198],c:[0,1],o:[-1,0],len:785},
@@ -45,12 +50,12 @@ const DOORS = [
   {name:'入戶門',rect:[4580,8310,4820,9200],h:[4820,9200],c:[0,-1],o:[1,0],len:890,entry:true},
 ];
 // 推拉門
-const SLIDES = [
+const SLIDES: { rect: Rect; v: boolean }[] = [
   {rect:[10270,7400,10510,9770],v:true},
   {rect:[1275,4950,2090,5190],v:false},
 ];
-const R = (x0,y0,x1,y1) => [[x0,y0],[x1,y0],[x1,y1],[x0,y1]];
-const ROOMS = [
+const R = (x0: number, y0: number, x1: number, y1: number): Point[] => [[x0, y0], [x1, y0], [x1, y1], [x0, y1]];
+const ROOMS: Room[] = [
   {id:'master', name:'主臥室', poly:R(6600,0,10270,3370), mat:'wood', at:[8435,2420]},
   {id:'mbath', name:'主衛浴', poly:R(4820,0,6360,2080), mat:'antislip', at:[5980,1780]},
   {id:'kid', name:'小孩房', poly:R(1820,0,4580,3370), mat:'wood', at:[3380,2330]},
@@ -65,7 +70,7 @@ const ROOMS = [
   {id:'bay1', name:'主臥飄窗', poly:[[10270,800],[10510,800],[10510,760],[11030,760],[11030,2650],[10510,2650],[10510,2600],[10270,2600]], mat:'marble', counted:false},
   {id:'bay2', name:'子女房飄窗', poly:[[10270,4260],[10510,4260],[10510,4210],[11030,4210],[11030,5785],[10510,5785],[10510,5740],[10270,5740]], mat:'marble', counted:false},
 ];
-const MATS = {
+export const SAMPLE_MATERIALS: Record<string, Material> = {
   wood:    {name:'橡木地板', price:320, sw:'#d8b88a'},
   walnut:  {name:'胡桃木地板', price:380, sw:'#9b7250'},
   tile800: {name:'800 地磚', price:220, sw:'#ebe6dc'},
@@ -75,44 +80,36 @@ const MATS = {
   terrazzo:{name:'水磨石', price:280, sw:'#e6dfd3'},
   carpet:  {name:'滿鋪地毯', price:200, sw:'#c9c3d3'},
 };
-// 傢俱庫：[型別, 名稱, 寬, 深, 顏色]
-const LIB = [
-  {cat:'臥室', items:[
-    ['bed','雙人床 1.8m',1800,2000,'#c9d6df'],['bed','雙人床 1.5m',1500,2000,'#d8c7dc'],['bed','單人床',1200,2000,'#e8d5b5'],
-    ['crib','嬰兒床',1250,700,'#efe3d0'],['nightstand','床頭櫃',450,400,'#e8dccb'],['wardrobe','衣櫃',2000,600,'#efe6d8'],
-    ['wardrobe','小衣櫃',1200,550,'#efe6d8'],['dresser','梳妝檯',1000,450,'#efe6d8'],['desk','書桌',1200,600,'#e2cfb4'],
-    ['chair','椅子',450,480,'#cfc6b8'],['bookshelf','書架',800,300,'#e2cfb4'],['baycushion','飄窗墊',520,1800,'#e7dccd']]},
-  {cat:'客廳', items:[
-    ['sofa','三人沙發',2400,900,'#b7c4b0'],['sofa','雙人沙發',1700,880,'#c3cbd6'],['cornersofa','轉角沙發',2800,1700,'#b7c4b0'],
-    ['armchair','單人沙發',850,850,'#d6b99a'],['beanbag','懶人沙發',800,800,'#e0b98f'],['coffeetable','茶几',1300,650,'#e8dccb'],
-    ['sidetable','邊桌',500,500,'#d9c3a3'],['tvstand','電視櫃',2400,400,'#e2cfb4'],['rug','地毯',2400,1700,'#d9cbb8'],
-    ['shoecab','鞋櫃',1000,350,'#efe6d8'],['shoecab','玄關櫃',1400,380,'#e6dccc'],['floorlamp','落地燈',450,450,'#3d3a34'],
-    ['plant','綠植',500,500,'#a9c39b'],['plant','大綠植',700,700,'#9dbb8c']]},
-  {cat:'餐廚', items:[
-    ['table','餐桌',1400,800,'#e2cfb4'],['table','六人餐桌',1800,900,'#d8c2a2'],['roundtable','圓桌',1000,1000,'#e2cfb4'],
-    ['chair','餐椅',450,480,'#cfc6b8'],['island','中島',1800,900,'#e9e5de'],['barstool','吧椅',420,420,'#6b5d4c'],
-    ['counter','櫥櫃檯面',1600,600,'#e9e5de'],['stove','瓦斯爐',750,450,'#dcdcdc'],['ksink','水槽',800,450,'#e1e6ea'],
-    ['fridge','冰箱',700,700,'#dfe4e8'],['cabinet','餐邊櫃',1600,400,'#efe6d8']]},
-  {cat:'衛浴', items:[
-    ['toilet','馬桶',400,700,'#ffffff'],['vanity','浴室櫃',800,500,'#eef1f3'],['vanity','雙洗手盆浴室櫃',1200,500,'#eef1f3'],
-    ['shower','淋浴房',900,900,'#e4edf2'],['bathtub','浴缸',1600,750,'#eef3f6'],['washer','洗衣機',600,600,'#e6ebee'],
-    ['waterheater','電熱水器',800,450,'#f4f4f2'],['cabinet','儲物櫃',1000,400,'#efe6d8']]},
-  {cat:'家電', items:[
-    ['tv','65 吋電視',1450,80,'#1d1d1f'],['tv','55 吋電視',1230,80,'#1d1d1f'],['fridge','對開門冰箱',910,700,'#c9ced3'],
-    ['aircon','直立式冷氣',500,380,'#f6f7f8'],['acwall','壁掛式冷氣',900,250,'#f6f7f8'],['dishwasher','洗碗機',600,600,'#c9ced3'],
-    ['ovencol','蒸烤箱高櫃',600,600,'#efe6d8'],['dryer','烘乾機',600,600,'#e6ebee'],['purifier','空氣清淨機',400,300,'#f4f4f2']]},
-  {cat:'書房 · 休閒', items:[
-    ['desk','長書桌',1600,700,'#d8c2a2'],['officechair','辦公椅',620,620,'#4a4f55'],['bookshelf','大書架',1600,350,'#e2cfb4'],
-    ['piano','立式鋼琴',1500,600,'#1f1d1b'],['treadmill','跑步機',800,1800,'#3a3a3c'],['armchair','閱讀椅',750,800,'#c9a98a']]},
+
+// Apartment perimeter dimensions from the reference.
+const REFERENCE_DIMENSIONS: DimensionChain[] = [
+  { horizontal: true, at: -750, start: 0, segments: [1580, 240, 2760, 240, 1540, 240, 3670] },
+  { horizontal: true, at: -1250, start: 0, segments: [10270] },
+  { horizontal: true, at: 11350, start: 0, segments: [2180, 240, 2160, 240, 5450, 240, 1340] },
+  { horizontal: true, at: 11850, start: 0, segments: [11850] },
+  { horizontal: false, at: -800, start: 0, segments: [3370, 1580, 240, 2770, 240, 2360] },
+  { horizontal: false, at: -1300, start: 0, segments: [10560] },
+  { horizontal: false, at: 12750, start: 0, segments: [3370, 240, 2760, 240, 3950] },
+  { horizontal: false, at: 13250, start: 0, segments: [10560] },
 ];
-const typeColor = t => { for (const c of LIB) for (const i of c.items) if (i[0]===t) return i[4]; return '#eee'; };
 
-// Sample furniture IDs are fixed (sample-f1, sample-f2, ...): the 3D model details are seeded from the ID, so
-// every fresh sample must look the same. Items the user adds get random IDs from ids.js.
-let _n = 0;
-const F = (type,name,cx,cy,w,d,rot=0,color) => ({id:`sample-f${++_n}`,type,name,cx,cy,w,d,rot,color:color||typeColor(type)});
+// Default colour of each furniture type in the sample: the colour of the first item of that type in the web
+// furniture library. Fixed here, so the sample does not depend on the library.
+const TYPE_COLORS: Record<string, string> = {
+  bed: '#c9d6df', nightstand: '#e8dccb', wardrobe: '#efe6d8', baycushion: '#e7dccd', shower: '#e4edf2', toilet: '#ffffff',
+  vanity: '#eef1f3', desk: '#e2cfb4', chair: '#cfc6b8', bookshelf: '#e2cfb4', washer: '#e6ebee', counter: '#e9e5de',
+  stove: '#dcdcdc', ksink: '#e1e6ea', fridge: '#dfe4e8', table: '#e2cfb4', cabinet: '#efe6d8', rug: '#d9cbb8',
+  tvstand: '#e2cfb4', sofa: '#b7c4b0', coffeetable: '#e8dccb', armchair: '#d6b99a', shoecab: '#efe6d8', plant: '#a9c39b',
+  roundtable: '#e2cfb4',
+};
 
-function defaultFurniture(){ _n = 0; return [
+// Sample furniture ids are fixed (sample-f1, sample-f2, ...): the 3D model details are seeded from the id, so every
+// new sample looks the same.
+function sampleFurniture(): Furniture[] {
+  let n = 0;
+  const F = (type: string, name: string, cx: number, cy: number, w: number, d: number, rot = 0, color?: string): Furniture =>
+    ({ id: `sample-f${++n}`, type, name, cx, cy, w, d, rot, color: color || TYPE_COLORS[type] || '#eee' });
+  return [
   // 主臥
   F('bed','雙人床',8300,1000,1800,2000,0,'#c9d6df'), F('nightstand','床頭櫃',7150,220,450,400), F('nightstand','床頭櫃',9450,220,450,400),
   F('wardrobe','衣櫃',8800,3070,2400,600,180), F('baycushion','飄窗墊',10770,1705,520,1800),
@@ -143,7 +140,33 @@ function defaultFurniture(){ _n = 0; return [
   // 休閒陽臺
   F('roundtable','茶桌',11180,8200,600,600), F('armchair','休閒椅',11180,7520,750,750,0,'#d6b99a'),
   F('armchair','休閒椅',11180,8880,750,750,180,'#d6b99a'), F('plant','綠植',11550,10250,500,500),
-];}
+];
+}
 
+const copy = <T>(value: T): T => JSON.parse(JSON.stringify(value));
 
-export { WALLS, WINS, DOORS, SLIDES, ROOMS, MATS, LIB, defaultFurniture };
+/** The sample apartment in the v1 shape. `id` defaults to a new random id. */
+export function createSamplePlanV1(id: string = createId()): PlanV1 {
+  return {
+    schemaVersion: 1, id, name: 'Apartment plan', units: 'mm', locale: 'zh-TW',
+    walls: WALLS.map(([x0, y0, x1, y1, type], i) => ({ id: `wall-${i}`, rect: [x0, y0, x1, y1], type })),
+    openings: [
+      ...WINS.map((rect, i) => ({ id: `window-${i}`, type: 'window' as const, rect })),
+      ...DOORS.map((door, i) => ({ ...door, id: `door-${i}`, type: 'door' as const })),
+      ...SLIDES.map((door, i) => ({ ...door, id: `slide-${i}`, type: 'sliding-door' as const })),
+    ],
+    rooms: copy(ROOMS), materials: copy(SAMPLE_MATERIALS),
+    furniture: sampleFurniture(), measurements: [], dimensions: copy(REFERENCE_DIMENSIONS),
+  };
+}
+
+/** The sample apartment as a v2 plan. `id` defaults to a new random id. */
+export const createSamplePlan = (id?: string): PlanV2 => migrateV1(createSamplePlanV1(id)).plan;
+
+/** A plan with no content. It keeps the sample's floor materials, so rooms added later have materials to use. */
+export function createEmptyPlan(id: string = createId()): PlanV2 {
+  return {
+    schemaVersion: 2, id, name: '未命名平面圖', units: 'mm', locale: 'zh-TW', ceilingHeight: 2800,
+    walls: [], openings: [], rooms: [], materials: copy(SAMPLE_MATERIALS), furniture: [], measurements: [], dimensions: [],
+  };
+}

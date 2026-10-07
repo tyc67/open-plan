@@ -5,17 +5,12 @@ import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer
 import { createModelFactory } from './models.js';
 import { formatLength } from '../units.js';
 import { snapFurniture } from '../wallSnapping.js';
-import { cameraPose, createViewFrame, groundSize, shadowBox } from 'open-plan-core';
+import { cameraPose, createViewFrame, groundSize, roomArea, shadowBox } from 'open-plan-core';
 import { wx, wz, planX, planY, setFrame } from './coordinates.js';
 
 function disposeGeometry(group) {
   group.traverse(o => o.geometry?.dispose());
   group.removeFromParent();
-}
-function roomArea(poly) {
-  return Math.abs(poly.reduce((sum,[x,y],i) => {
-    const [nx,ny] = poly[(i+1)%poly.length]; return sum + x*ny - nx*y;
-  },0)) / 2e6;
 }
 export function createViewer(host, callbacks) {
   const renderer = new THREE.WebGLRenderer({antialias:true});

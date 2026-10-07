@@ -1,5 +1,5 @@
 import { planGeometry } from 'open-plan-core';
-import { containsPoint } from './roomGeometry.js';
+import { containsPoint } from 'open-plan-core';
 
 // Trig at 90° leaves float noise (1789.9999999999998). 0.1 mm keeps odd sizes (half mm) flush.
 const tenthMm = v => Math.round(v*10)/10;

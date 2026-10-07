@@ -235,7 +235,8 @@ One validator is used for saved documents at load, for imports, by the CLI and M
     - **Tolerable issues** can be shown and edited safely: self-crossing or very small room polygons, overlapping openings in one wall, a room `mat` with no material (drawn with a default material), heights out of range (drawn clamped), a plan larger than the size limits, a window in a `low` wall (its glass stands above the low wall), a demolished bearing or exterior wall (drawn as demolished; the editor can restore it, but not demolish it again).
 - **Policy by source, not by version:**
     - **Saved plans** (localStorage, or the file in `serve`): tolerable issues are **warnings**, in v1 and in v2, so a plan that loaded before a save also loads after it. Errors that block rendering follow the H2 path: the data is kept in the recovery copy and the plan does not open.
-    - **Import, CLI `validate` and MCP tools:** tolerable issues are **errors**. The agent or the user must correct them.
+    - **Import, CLI `validate`, MCP `validate_plan` and `migrate_plan`:** tolerable issues are **errors**. The agent or the user must correct them.
+    - **Editing commands** (C1: CLI `apply`, MCP `apply_commands`, the editor): the result is validated with the **saved** policy, so an existing tolerable issue does not block an unrelated edit. Each command still **refuses the outcomes that it forbids** (see C1), even when the validator would only warn.
 - **The migration repairs nothing silently.** It only changes the format and reports what it found.
 - **Schema file:** `docs/open-plan.schema.json` covers the **structural** rules (fields, types, enums, ranges of single values). Rules that need more than one value (references, overlap, polygon crossing, opening inside the wall length) are **semantic**. The schema description lists them, and only the validator checks them.
 - **Two test sets:** structural fixtures, where the schema and the validator must give the same pass or fail; and semantic fixtures, which pass the schema and must fail the validator with the expected `code` and `path`.
@@ -347,6 +348,33 @@ A framework-free TypeScript package (`packages/core`) with no React, no Three.js
         - **`change_opening_type`:** for example window → door. It must give all the fields of the new type; fields that the new type does not use are removed.
     - **Rooms** are not linked to walls in this phase. After a wall command, a room edge that was on a wall face and is no longer on it gives a warning.
 - **Batches:** a list of commands is applied as one unit. The validator runs on the result. If it fails, nothing changes and the errors are returned with the index of the command that caused them.
+
+**Decisions (C1 review, 2026-10-07):**
+
+- **Validation of edits:** the result of a batch is validated with the **saved** policy: errors that block rendering refuse the batch, and tolerable issues are returned as warnings. Commands refuse their own forbidden outcomes regardless of the policy: an opening that overlaps another or goes outside its wall, the demolition of a bearing or exterior wall, and the other refusals listed above. `scale_plan` keeps the D3 rule: a result with errors is refused.
+- **Batch contract:**
+    - The input plan is never changed. A failure returns no plan.
+    - `commandIndex` is zero-based.
+    - A command refusal names the command that was refused. An error from the final validation names the first command after which the error exists.
+    - Warnings that the plan had before the batch get no command index.
+    - Success returns the normalized plan, its current warnings, and structured notes (for example the openings that `delete_wall` removed, and generated ids).
+- **Ids:** `add_*` commands take an optional `id`. A missing id is generated from the working plan: deterministic and not used by any item in that list. Generated ids are in the notes. When a later command in the same batch refers to a new item, the agent gives the id itself.
+- **Small additions:** an optional wall `name` (types, schema, validator and format description); `set_plan_name`; `set_material`, which creates or replaces one material by its key.
+- **Shared document behaviour moves to core:** the v1 preparation (v1 check, legacy names, the guarded room corrections, which also appear in the migration report), sample and empty plan creation, and room geometry. The furniture library stays in the web app. Core does not depend on browser storage, React or Three.js. The sample data and its rendering do not change; generated plan ids may differ between creations.
+- **Types:** rooms, materials and furniture get real types when commands need them, not `unknown[]`.
+- **Two parts:** **C1a**: the move to core, the command and result types, batches, the wall and opening commands, `set_plan_name` and `set_material`. **C1b**: the remaining commands and the SVG drawing.
+
+**Implementation (C1a):**
+
+- **Moved to core:** `createSamplePlan`, `createSamplePlanV1`, `createEmptyPlan` and `SAMPLE_MATERIALS` (`sample.ts`); `checkDocumentV1`, `localizeLegacyNames`, `correctLegacyRooms` and `migrateV1Document`, the whole v1 path (`v1-document.ts`); `roomArea`, `roomPerimeter`, `containsPoint` (`rooms.ts`); `createId` and the deterministic `uniqueId` (`ids.ts`). The web files `seed.js`, `document.js`, `locale.js`, `geometryMigration.js`, `dimensions.js`, `roomGeometry.js` and `ids.js` are removed; the furniture library is now `furnitureLibrary.js`. The sample furniture colours that came from the library are fixed in core. A corrected old-sample room gives the report note `room-polygon-corrected`. Rooms, materials, furniture, measurements, dimension chains and the cost estimate have real types.
+- **Same sample:** a test compares the core sample with the stored v1 fixture (only the fixed furniture ids differ), and the visual capture is pixel-identical to baseline 3.
+- **Commands:** `applyCommands(plan, commands)` in `packages/core/src/commands/`, with typed `Command`, `CommandIssue`, `CommandNote` and `BatchResult`. A command is `{ "op": "move_wall_end", "wallId": "w1", "end": "a", "to": [x, y] }`. Every field is checked at run time: unknown fields are refused (`command-field-unknown`), and fields that another command changes are refused with that command (`field-not-updatable`, `params.use`). A refusal has the path inside the command, for example `commands[2].offset`.
+- **Field choices** that the list above leaves open: `move_wall` takes `by: [dx, dy]`; `split_wall` takes `at: [x, y]` and an optional `newId` for the `b` piece; `join_walls` takes `wallId` and `otherId`, and the result keeps the id and direction of `wallId`; `resize_opening` takes `keep: "start" | "end"`, the edge that stays in place; `toggle_demolition` takes an optional `demolished`, and switches when it is left out.
+- **Rules beyond the list:** a command refuses a window in a low wall, an opening in a demolished wall, and heights out of range on the opening it adds or changes. `move_wall_end` refuses a point off the wall line, and an end that passes the other end (use `reverse_wall`). Joining two walls that run in opposite directions changes the door hinge and swing of the joined openings, so every door stays in the same place.
+- **Room edges:** after a wall command, each room edge is compared by length: the parts that were on a face of the changed wall, minus the parts on any wall face after the command. If some part lost its support (for example a wall that only got shorter), the warning `room-edge-off-wall` gives the command index and `uncoveredLength` in mm. A part that another wall still supports does not warn.
+- **Field names** are checked as own properties, so `constructor`, `toString` or `__proto__` in a command are unknown fields.
+- **Material `price`** (optional, 0 or more) is checked by the validator and the schema, the same as `set_material` checks it.
+- **Check:** `packages/core/test/commands.test.ts` (each command, each refusal, the batch contract) and `shared-data.test.ts`.
 - **2D SVG drawing:** walls, openings, rooms, labels and furniture outlines. It is a simpler drawing than the editor; it is for checking, not for presentation.
 - The editor's own edits move to these commands over time (README step 1). This is not required to finish Step C.
 
@@ -505,4 +533,5 @@ Two image points and one length give only the scale. Alignment needs **pairs of 
 - **Large-plan shadows (2026-10-07):** keep shadows at all plan sizes, from the 100 × 100 m record in Step A (softness, artifacts, edges, frame rate). Check again on real GPU hardware before a release.
 
 **Open:**
+- **Intermittent import-check failure (2026-10-07).** In `tools/checks/import.mjs`, the keyboard step timed out in 2 of about 20 full runs: Enter on the focused 匯入 button opened no file chooser. The same step alone passed 25 of 25 runs, so it depends on the earlier steps of the check. The cause is not known, and it can be in the app or in the test. The check now asserts the file chooser and reports where focus was before and after Enter; 10 full runs then passed, but that change can also change the timing. Find the cause before Step B is closed.
 - **Package name.** Check on 2026-10-06: `open-plan` on npm is **taken** (version 1.0.0, a Markdown plan review CLI, not related). `@open-plan/cli` is not published, but that does not show that the `@open-plan` scope is free or that we control it. **Before publishing, choose a scope that we control.** Until then, examples use `<package>` and `<cli>`.

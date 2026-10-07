@@ -1,5 +1,6 @@
-// Exact legacy seed labels are migrated without changing custom names or geometry.
-const legacyNames = new Map([
+// Exact labels of the old (simplified Chinese) sample, with their zh-TW text. Only exact matches change; custom
+// names are kept.
+export const LEGACY_NAMES: ReadonlyMap<string, string> = new Map([
   ["\u5c0f\u5b69\u623f\u95e8", "小孩房門"],
   ["\u4e3b\u5367\u95e8", "主臥門"],
   ["\u4e3b\u536b\u95e8", "主衛門"],
@@ -79,15 +80,3 @@ const legacyNames = new Map([
   ["\u6dcb\u6d74\u533a", "淋浴區"],
   ["\u4f11\u95f2\u6905", "休閒椅"],
 ]);
-const localize = item => typeof item?.name === 'string' && legacyNames.has(item.name)
-  ? {...item, name: legacyNames.get(item.name)} : item;
-
-export function localizeDocument(doc) {
-  return {
-    ...doc, locale: 'zh-TW',
-    furniture: doc.furniture.map(localize),
-    rooms: doc.rooms.map(localize),
-    openings: doc.openings.map(localize),
-    materials: Object.fromEntries(Object.entries(doc.materials || {}).map(([id,material]) => [id,localize(material)])),
-  };
-}

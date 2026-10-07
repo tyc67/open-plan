@@ -1,4 +1,4 @@
-import { roomArea, containsPoint } from './roomGeometry.js';
+import { roomArea, containsPoint } from 'open-plan-core';
 
 const defaults={currency:'TWD',wastePercent:5,furniturePrices:{},materialPrices:{}};
 const validPrice=value=>typeof value==='number'&&Number.isFinite(value)&&value>=0;
