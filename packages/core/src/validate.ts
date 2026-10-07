@@ -1,5 +1,6 @@
 import { wallLength } from './geometry.js';
 import { CEILING_MAX, CEILING_MIN, HEAD_MIN } from './heights.js';
+import { polygonArea, polygonSelfCrossing } from './rooms.js';
 import type { OpeningV2, PlanV2, Point } from './types.js';
 
 /**
@@ -29,6 +30,12 @@ export const DEFAULT_HEIGHTS = { ceilingHeight: 2800, windowSill: 900, windowHea
 export const THICKNESS_MIN = 20, THICKNESS_MAX = 1000;
 /** 0.01 m² in mm². */
 export const ROOM_MIN_AREA = 10_000;
+/**
+ * Lengths along a wall are compared with this tolerance (mm): 0.1 mm values are not exact in binary, so
+ * 1000.1 + 1000.2 is a little more than 2000.3. Without it, rounding noise would put an opening outside its wall or
+ * over the next one.
+ */
+export const LENGTH_TOLERANCE = 1e-6;
 
 /**
  * Codes for issues that can be shown and edited safely. Every other code blocks rendering and is an error for
@@ -93,25 +100,6 @@ class Collector {
   }
 }
 
-const area = (poly: Point[]) => Math.abs(poly.reduce((sum, [x, y], i) => { const [nx, ny] = poly[(i + 1) % poly.length]; return sum + x * ny - nx * y; }, 0)) / 2;
-const cross = (o: Point, a: Point, b: Point) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
-const onSegment = (p: Point, a: Point, b: Point) => Math.min(a[0], b[0]) <= p[0] && p[0] <= Math.max(a[0], b[0]) && Math.min(a[1], b[1]) <= p[1] && p[1] <= Math.max(a[1], b[1]);
-function segmentsTouch(a: Point, b: Point, c: Point, d: Point): boolean {
-  const d1 = cross(c, d, a), d2 = cross(c, d, b), d3 = cross(a, b, c), d4 = cross(a, b, d);
-  if (((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0))) return true;
-  return (d1 === 0 && onSegment(a, c, d)) || (d2 === 0 && onSegment(b, c, d)) || (d3 === 0 && onSegment(c, a, b)) || (d4 === 0 && onSegment(d, a, b));
-}
-/** True if two edges that are not neighbours cross or touch. Repeated points are removed first. */
-function selfCrossing(poly: Point[]): boolean {
-  const pts = poly.filter((p, i) => { const q = poly[(i + poly.length - 1) % poly.length]; return p[0] !== q[0] || p[1] !== q[1]; });
-  const n = pts.length;
-  for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) {
-    if (j === i + 1 || (i === 0 && j === n - 1)) continue;
-    if (segmentsTouch(pts[i], pts[(i + 1) % n], pts[j], pts[(j + 1) % n])) return true;
-  }
-  return false;
-}
-
 /** Checks the fields that v1 and v2 share: rooms, furniture, materials, measurements, dimensions, cost estimate. */
 function checkShared(plan: Obj, c: Collector, extent: Extent) {
   const materials = c.field(plan, 'materials', '$', 'object') ? plan.materials as Obj : null;
@@ -139,8 +127,8 @@ function checkShared(plan: Obj, c: Collector, extent: Extent) {
       const pts = poly as Point[];
       for (const [x, y] of pts) extent.add(x, y);
       // Crossing first: the area formula is not the real area of a polygon that crosses itself (a bow tie gives 0).
-      if (selfCrossing(pts)) { c.add(`${at}.poly`, 'room-self-crossing'); continue; }
-      const a = area(pts);
+      if (polygonSelfCrossing(pts)) { c.add(`${at}.poly`, 'room-self-crossing'); continue; }
+      const a = polygonArea(pts);
       if (a < ROOM_MIN_AREA) c.add(`${at}.poly`, 'room-area-too-small', { area: a / 1e6, min: ROOM_MIN_AREA / 1e6 });
     }
   }
@@ -272,7 +260,7 @@ export function validatePlan(input: unknown, source: ValidationSource): Validati
       if (widthOk && (o.width as number) <= 0) { c.add(`${at}.width`, 'size-not-positive', { value: o.width }); widthOk = false; }
       if (wall && offsetOk && widthOk) {
         const length = wallLength(wall), end = (o.offset as number) + (o.width as number);
-        if (end > length) c.add(`${at}.width`, 'opening-outside-wall', { wallLength: length, end });
+        if (end > length + LENGTH_TOLERANCE) c.add(`${at}.width`, 'opening-outside-wall', { wallLength: length, end });
         else spans.push({ wallId: o.wallId as string, start: o.offset as number, end, id: String(o.id), path: at });
       }
       if (!typeOk) continue;
@@ -308,7 +296,7 @@ export function validatePlan(input: unknown, source: ValidationSource): Validati
     list.sort((p, q) => p.start - q.start);
     let reach: (typeof spans)[number] | null = null;
     for (const s of list) {
-      if (reach && s.start < reach.end) c.add(s.path, 'openings-overlap', { otherId: reach.id, otherPath: reach.path });
+      if (reach && s.start < reach.end - LENGTH_TOLERANCE) c.add(s.path, 'openings-overlap', { otherId: reach.id, otherPath: reach.path });
       if (!reach || s.end > reach.end) reach = s;
     }
   }

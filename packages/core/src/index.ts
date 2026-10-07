@@ -12,3 +12,4 @@ export * from './rooms.js';
 export * from './v1-document.js';
 export * from './sample.js';
 export * from './commands/index.js';
+export * from './svg.js';

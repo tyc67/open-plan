@@ -2,11 +2,13 @@ import type { PlanV2 } from '../types.js';
 import { validatePlan, type Issue } from '../validate.js';
 import { OPENING_COMMANDS } from './openings.js';
 import { PLAN_COMMANDS } from './plan.js';
+import { ROOM_FURNITURE_COMMANDS } from './rooms-furniture.js';
+import { SCALE_COMMANDS } from './scale.js';
 import { Refusal, type Step } from './support.js';
 import type { BatchResult, Command, CommandIssue, CommandNote, CommandOp } from './types.js';
 import { WALL_COMMANDS } from './walls.js';
 
-const COMMANDS: Record<CommandOp, (plan: PlanV2, command: never) => Step> = { ...WALL_COMMANDS, ...OPENING_COMMANDS, ...PLAN_COMMANDS };
+const COMMANDS: Record<CommandOp, (plan: PlanV2, command: never) => Step> = { ...WALL_COMMANDS, ...OPENING_COMMANDS, ...ROOM_FURNITURE_COMMANDS, ...PLAN_COMMANDS, ...SCALE_COMMANDS };
 /** Every command name, for tools that list them. */
 export const COMMAND_OPS = Object.keys(COMMANDS) as CommandOp[];
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyCommands, COMMAND_OPS, hingePoint, openingRect, validatePlan, wallLength } from '../src/index.js';
+import { applyCommands, COMMAND_OPS, createSamplePlan, hingePoint, openingRect, validatePlan, wallLength } from '../src/index.js';
 import type { CommandIssue, DoorV2, PlanV2 } from '../src/index.js';
 
 // One room, 6 × 4 m: exterior wall w1 on top with a window and a door, partition w2 on the right, low wall w3 below,
@@ -111,7 +111,7 @@ describe('batch contract', () => {
   });
   it('every op has an implementation and is listed once', () => {
     expect(new Set(COMMAND_OPS).size).toBe(COMMAND_OPS.length);
-    expect(COMMAND_OPS).toHaveLength(17);
+    expect(COMMAND_OPS).toHaveLength(25);
   });
 });
 
@@ -352,5 +352,147 @@ describe('plan commands', () => {
     const replaced = ok([{ op: 'set_material', key: 'wood', name: 'Oak', sw: '#d8b88a' }]);
     expect([replaced.plan.materials.wood, replaced.notes[0].code, replaced.plan.rooms[0].mat]).toEqual([{ name: 'Oak', sw: '#d8b88a' }, 'material-replaced', 'wood']);
     expect(refused([{ op: 'set_material', key: 'x', name: 'X', sw: '#000', price: -1 }]).code).toBe('value-out-of-range');
+  });
+});
+
+describe('room commands', () => {
+  const square = [[1000, 1000], [3000, 1000], [3000, 3000], [1000, 3000]];
+  it('add_room adds a room with a generated id; the same batch can create its material first', () => {
+    const result = ok([{ op: 'set_material', key: 'tile', name: 'Tile', sw: '#eee' }, { op: 'add_room', name: 'Bath', mat: 'tile', poly: square, counted: false }]);
+    expect(result.plan.rooms[1]).toEqual({ id: 'room', name: 'Bath', mat: 'tile', poly: square, counted: false });
+    expect(result.notes[1]).toEqual({ commandIndex: 1, code: 'id-generated', params: { list: 'rooms', id: 'room' } });
+  });
+  it('add_room refuses a missing material, too few points, a crossing outline and a tiny area', () => {
+    const add = (fields: object) => refused([{ op: 'add_room', name: 'X', mat: 'wood', poly: square, ...fields }]);
+    expect(add({ mat: 'stone' })).toMatchObject({ path: 'commands[0].mat', code: 'room-material-missing', params: { use: ['set_material'] } });
+    expect(add({ poly: [[0, 0], [1, 1]] }).code).toBe('room-too-few-points');
+    expect(add({ poly: [[0, 0], [1000, 1000], [1000, 0], [0, 1000]] }).code).toBe('room-self-crossing');
+    expect(add({ poly: [[0, 0], [50, 0], [50, 50], [0, 50]] }).code).toBe('room-area-too-small');
+    expect(add({ poly: [[0, 0], [1, 'x']] })).toMatchObject({ path: 'commands[0].poly', code: 'type-invalid' });
+    expect(add({ id: 'r1' }).code).toBe('id-duplicate');
+  });
+  it('update_room changes fields with the same checks; delete_room deletes', () => {
+    const plan = ok([{ op: 'update_room', roomId: 'r1', name: 'Living', poly: square, at: [2000, 2000], counted: false }]).plan;
+    expect(plan.rooms[0]).toEqual({ id: 'r1', name: 'Living', mat: 'wood', poly: square, at: [2000, 2000], counted: false });
+    expect(refused([{ op: 'update_room', roomId: 'r1', mat: 'stone' }]).code).toBe('room-material-missing');
+    expect(refused([{ op: 'update_room', roomId: 'r1', id: 'r2' }]).code).toBe('field-not-updatable');
+    expect(refused([{ op: 'update_room', roomId: 'nope', name: 'x' }]).code).toBe('room-missing');
+    expect(ok([{ op: 'delete_room', roomId: 'r1' }]).plan.rooms).toEqual([]);
+  });
+});
+
+describe('furniture commands', () => {
+  const sofa = { op: 'add_furniture', type: 'sofa', name: 'Sofa', cx: 3000, cy: 2000, w: 2000, d: 900 };
+  it('add_furniture adds an item with rot 0 and a generated id; size must be above 0', () => {
+    expect(ok([sofa]).plan.furniture).toEqual([{ id: 'furniture', type: 'sofa', name: 'Sofa', cx: 3000, cy: 2000, w: 2000, d: 900, rot: 0 }]);
+    expect(refused([{ ...sofa, w: 0 }])).toMatchObject({ path: 'commands[0].w', code: 'size-not-positive' });
+  });
+  it('update_furniture changes fields; delete_furniture also removes its price', () => {
+    const plan = ok([{ ...sofa, id: 's' }, { op: 'update_furniture', furnitureId: 's', cx: 3500, rot: 90, color: '#888' }]).plan;
+    expect(plan.furniture[0]).toMatchObject({ cx: 3500, rot: 90, color: '#888', w: 2000 });
+    expect(refused([{ ...sofa, id: 's' }, { op: 'update_furniture', furnitureId: 's', d: -1 }]).code).toBe('size-not-positive');
+    expect(refused([{ op: 'update_furniture', furnitureId: 'nope', cx: 1 }]).code).toBe('furniture-missing');
+    const priced = { ...base(), costEstimate: { furniturePrices: { s: 12000, other: 5 }, wastePercent: 10 } };
+    const result = ok([{ ...sofa, id: 's' }, { op: 'delete_furniture', furnitureId: 's' }], priced);
+    expect([result.plan.furniture, result.plan.costEstimate]).toEqual([[], { furniturePrices: { other: 5 }, wastePercent: 10 }]);
+    expect(result.notes.at(-1)).toEqual({ commandIndex: 1, code: 'furniture-price-removed', params: { furnitureId: 's' } });
+    expect(ok([{ ...sofa, id: 's' }, { op: 'delete_furniture', furnitureId: 's' }]).notes).toEqual([]);
+  });
+});
+
+describe('set_ceiling_height', () => {
+  it('sets the ceiling; refuses a value out of range or below an opening head', () => {
+    expect(ok([{ op: 'set_ceiling_height', ceilingHeight: 2600 }]).plan.ceilingHeight).toBe(2600);
+    expect(refused([{ op: 'set_ceiling_height', ceilingHeight: 2300 }])).toMatchObject({ code: 'opening-head-above-ceiling', params: { openingId: 'win', head: 2400 } });
+    expect(refused([{ op: 'set_ceiling_height', ceilingHeight: 7000 }]).code).toBe('height-out-of-range');
+  });
+});
+
+describe('scale_plan (roadmap D3)', () => {
+  const multipleOfTenth = (v: number) => Math.abs(v * 10 - Math.round(v * 10)) < 1e-6;
+  it('scales the D3 fields about the pivot and keeps the others', () => {
+    const plan = { ...base(), furniture: [{ id: 'f', type: 'sofa', name: 'S', cx: 3000, cy: 2000, w: 2000, d: 900, rot: 30 }],
+      measurements: [{ id: 'm', a: { x: 0, y: 0 }, b: { x: 1000, y: 500 } }], dimensions: [{ horizontal: true, at: -500, start: 0, segments: [1000, 5000] }] };
+    const result = ok([{ op: 'scale_plan', factor: 2, pivot: [0, 0] }], plan);
+    const p = result.plan;
+    expect(wall(p, 'w1')).toEqual({ id: 'w1', type: 'e', a: [0, 0], b: [12000, 0], thickness: 400 });
+    expect(opening(p, 'd1')).toEqual({ ...base().openings[1], offset: 6000, width: 1800 });
+    expect(opening(p, 'win')).toMatchObject({ offset: 2000, width: 2400, sill: 900, head: 2400 });
+    expect(p.rooms[0].poly).toEqual([[200, 200], [11880, 200], [11880, 7880], [200, 7880]]);
+    expect(p.furniture[0]).toEqual({ id: 'f', type: 'sofa', name: 'S', cx: 6000, cy: 4000, w: 2000, d: 900, rot: 30 });
+    expect(p.measurements).toEqual([{ id: 'm', a: { x: 0, y: 0 }, b: { x: 2000, y: 1000 } }]);
+    expect(p.dimensions).toEqual([{ horizontal: true, at: -1000, start: 0, segments: [2000, 10000] }]);
+    expect([p.ceilingHeight, p.materials]).toEqual([2800, base().materials]);
+    expect(result.notes).toEqual([{ commandIndex: 0, code: 'plan-scaled', params: { factor: 2, pivot: [0, 0] } }]);
+  });
+  it('two points and their real distance give the factor, with the first point as the pivot', () => {
+    const result = ok([{ op: 'scale_plan', a: [6000, 0], b: [6000, 4000], distance: 4400 }]);
+    expect(result.notes[0].params).toEqual({ factor: 1.1, pivot: [6000, 0] });
+    expect(wall(result.plan, 'w1')).toMatchObject({ a: [-600, 0], b: [6000, 0], thickness: 220 });
+  });
+  it('the sample scaled by an odd factor about an odd pivot: values are multiples of 0.1 mm, and no new issue appears', () => {
+    const sample = createSamplePlan('s');
+    const result = ok([{ op: 'scale_plan', factor: 1.0371, pivot: [123.45, 678.9] }], sample);
+    expect(result.warnings).toEqual([]);
+    const p = result.plan, values = [...p.walls.flatMap(w => [...w.a, ...w.b, w.thickness]), ...p.openings.flatMap(o => [o.offset, o.width]), ...p.rooms.flatMap(r => r.poly.flat()), ...p.furniture.flatMap(f => [f.cx, f.cy])];
+    expect(values.every(multipleOfTenth)).toBe(true);
+    // An opening that filled its wall piece still ends at the wall end.
+    const full = sample.openings.filter(o => o.offset + o.width === wallLength(wall(sample, o.wallId)));
+    expect(full.length).toBeGreaterThan(10);
+    for (const o of full) { const s = opening(p, o.id); expect(Math.abs(s.offset + s.width - wallLength(wall(p, o.wallId)))).toBeLessThan(1e-6); }
+  });
+  it('refuses a factor of 0, the same two points, and a result with errors, with no change', () => {
+    expect(refused([{ op: 'scale_plan', factor: 0, pivot: [0, 0] }])).toMatchObject({ path: 'commands[0].factor', code: 'size-not-positive' });
+    expect(refused([{ op: 'scale_plan', a: [1, 1], b: [1, 1], distance: 100 }]).code).toBe('scale-points-same');
+    expect(refused([{ op: 'scale_plan', factor: 2, pivot: [0, 0], a: [0, 0] }]).code).toBe('command-field-unknown');
+    const thick = refused([{ op: 'scale_plan', factor: 6, pivot: [0, 0] }]);
+    expect(thick).toMatchObject({ path: 'commands[0]', code: 'scale-result-invalid' });
+    expect((thick.params.issues as { code: string }[]).map(i => i.code)).toContain('thickness-out-of-range');
+  });
+  it('refuses a result larger than 100 × 100 m, although a saved plan only warns about the size', () => {
+    const thin = { ...base(), walls: base().walls.map(w => ({ ...w, thickness: 20 })) };
+    const large = refused([{ op: 'scale_plan', factor: 20, pivot: [0, 0] }], thin);
+    expect((large.params.issues as { code: string }[]).map(i => i.code)).toEqual(['plan-too-large']);
+  });
+});
+
+describe('decimal lengths through wall changes', () => {
+  // 2000.3 − 1000.1 − 1000.2 is −1.1e−13 in binary floating point.
+  const decimal = (): PlanV2 => ({ ...base(), rooms: [],
+    walls: [{ id: 'w', type: 'n', a: [0, 0], b: [2000.3, 0], thickness: 100 }],
+    openings: [{ id: 'o', type: 'door', wallId: 'w', offset: 1000.1, width: 1000.2, hinge: 'start', swing: 'right', head: 2100 }] });
+  it('the plan is valid as it is', () => expect(validatePlan(decimal(), 'import').errors).toEqual([]));
+  it('reverse_wall gives offset 0, and reversing twice gives back the exact plan', () => {
+    expect(opening(ok([{ op: 'reverse_wall', wallId: 'w' }], decimal()).plan, 'o')).toMatchObject({ offset: 0, hinge: 'end', swing: 'left' });
+    expect(ok([{ op: 'reverse_wall', wallId: 'w' }, { op: 'reverse_wall', wallId: 'w' }], decimal()).plan).toEqual(decimal());
+  });
+  it('move_wall_end gives clean offsets, also to exactly 0', () => {
+    expect(opening(ok([{ op: 'move_wall_end', wallId: 'w', end: 'a', to: [1000.1, 0] }], decimal()).plan, 'o').offset).toBe(0);
+    expect(opening(ok([{ op: 'move_wall_end', wallId: 'w', end: 'a', to: [-0.2, 0] }], decimal()).plan, 'o').offset).toBe(1000.3);
+    expect(refused([{ op: 'move_wall_end', wallId: 'w', end: 'a', to: [1000.2, 0] }], decimal()).code).toBe('opening-outside-wall');
+  });
+  it('split_wall at the opening start, and join_walls after it, give clean values and the exact plan back', () => {
+    const split = ok([{ op: 'split_wall', wallId: 'w', at: [1000.1, 0], newId: 'w2' }], decimal()).plan;
+    expect(opening(split, 'o')).toMatchObject({ wallId: 'w2', offset: 0 });
+    expect(ok([{ op: 'split_wall', wallId: 'w', at: [1000.1, 0], newId: 'w2' }, { op: 'join_walls', wallId: 'w', otherId: 'w2' }], decimal()).plan).toEqual(decimal());
+    expect(ok([{ op: 'split_wall', wallId: 'w', at: [1000.1, 0], newId: 'w2' }, { op: 'reverse_wall', wallId: 'w2' }, { op: 'join_walls', wallId: 'w', otherId: 'w2' }], decimal()).plan).toEqual(decimal());
+  });
+  it('split_wall in a wall that starts at a decimal point gives a clean offset', () => {
+    const shifted = decimal(); shifted.walls[0] = { ...shifted.walls[0], a: [0.2, 0], b: [2000.5, 0] };
+    expect(1000.1 - (1000.3 - 0.2)).not.toBe(0);
+    expect(opening(ok([{ op: 'split_wall', wallId: 'w', at: [1000.3, 0], newId: 'w2' }], shifted).plan, 'o')).toMatchObject({ wallId: 'w2', offset: 0 });
+  });
+  it('split_wall exactly at an opening start whose distance comes out a little larger in binary', () => {
+    const plan = decimal(); plan.walls[0] = { ...plan.walls[0], a: [5.6, 0], b: [2005.6, 0] }; plan.openings[0] = { ...plan.openings[0], offset: 2.7, width: 500 };
+    expect(8.3 - 5.6 > 2.7).toBe(true);
+    expect(opening(ok([{ op: 'split_wall', wallId: 'w', at: [8.3, 0], newId: 'w2' }], plan).plan, 'o')).toMatchObject({ wallId: 'w2', offset: 0 });
+  });
+  it('resize_opening keeping the end gives a clean offset', () => {
+    expect(opening(ok([{ op: 'resize_opening', openingId: 'o', width: 500, keep: 'end' }], decimal()).plan, 'o')).toMatchObject({ offset: 1500.3, width: 500 });
+  });
+  it('an input offset below 0 is still refused, however small', () => {
+    expect(refused([{ op: 'move_opening', openingId: 'o', offset: -1e-9 }], decimal()).code).toBe('value-out-of-range');
+    const negative = decimal(); negative.openings[0].offset = -1e-9;
+    expect(validatePlan(negative, 'import').errors.map(e => e.code)).toEqual(['value-out-of-range']);
   });
 });

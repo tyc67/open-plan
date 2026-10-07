@@ -1,3 +1,4 @@
+import { CEILING_MAX, CEILING_MIN } from '../heights.js';
 import type { Material, PlanV2 } from '../types.js';
 import type { PlanCommand } from './types.js';
 import { readFields, refuse, type Step } from './support.js';
@@ -16,4 +17,13 @@ function setMaterial(plan: PlanV2, c: Extract<PlanCommand, { op: 'set_material' 
   return { plan: { ...plan, materials: { ...plan.materials, [c.key]: material } }, notes: [{ code: replaced ? 'material-replaced' : 'material-created', params: { key: c.key } }] };
 }
 
-export const PLAN_COMMANDS = { set_plan_name: setPlanName, set_material: setMaterial } as const;
+/** The ceiling of the whole plan. No opening head may end up above it. */
+function setCeilingHeight(plan: PlanV2, c: Extract<PlanCommand, { op: 'set_ceiling_height' }>): Step {
+  readFields(c, { required: { ceilingHeight: 'number' } });
+  if (c.ceilingHeight < CEILING_MIN || c.ceilingHeight > CEILING_MAX) refuse('ceilingHeight', 'height-out-of-range', { min: CEILING_MIN, max: CEILING_MAX, value: c.ceilingHeight });
+  const above = plan.openings.find(o => o.head > c.ceilingHeight);
+  if (above) refuse('ceilingHeight', 'opening-head-above-ceiling', { openingId: above.id, head: above.head, use: ['update_opening'] });
+  return { plan: { ...plan, ceilingHeight: c.ceilingHeight } };
+}
+
+export const PLAN_COMMANDS = { set_plan_name: setPlanName, set_material: setMaterial, set_ceiling_height: setCeilingHeight } as const;

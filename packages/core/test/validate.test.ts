@@ -210,3 +210,19 @@ describe('validateSharedFields', () => {
     expect(result.warnings).toEqual([expect.objectContaining({ code: 'room-material-missing', path: 'rooms[0].mat' })]);
   });
 });
+
+describe('length tolerance along a wall', () => {
+  // 1000.1 + 1000.2 is 2000.3000000000002 in binary floating point.
+  const plan = (openings: object[], length = 2000.3) => ({ ...base(), walls: [{ id: 'w', type: 'n', a: [0, 0], b: [length, 0], thickness: 100 }], openings, rooms: [] });
+  it('an opening that ends at the wall end in decimal is inside the wall', () => {
+    expect(validatePlan(plan([{ id: 'o', type: 'hole', wallId: 'w', offset: 1000.1, width: 1000.2 }]), 'import').errors).toEqual([]);
+  });
+  it('two openings that touch in decimal do not overlap', () => {
+    expect(1000.1 + 1000.2 > 2000.3).toBe(true);
+    expect(validatePlan(plan([{ id: 'o1', type: 'hole', wallId: 'w', offset: 1000.1, width: 1000.2 }, { id: 'o2', type: 'hole', wallId: 'w', offset: 2000.3, width: 500 }], 3000), 'import').errors).toEqual([]);
+  });
+  it('0.1 mm outside the wall or over the next opening is still an issue', () => {
+    expect(validatePlan(plan([{ id: 'o', type: 'hole', wallId: 'w', offset: 1000.1, width: 1000.3 }]), 'import').errors.map(e => e.code)).toEqual(['opening-outside-wall']);
+    expect(validatePlan(plan([{ id: 'o1', type: 'hole', wallId: 'w', offset: 0, width: 1000.3 }, { id: 'o2', type: 'hole', wallId: 'w', offset: 1000.2, width: 500 }]), 'import').errors.map(e => e.code)).toEqual(['openings-overlap']);
+  });
+});

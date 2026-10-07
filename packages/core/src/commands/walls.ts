@@ -1,9 +1,9 @@
 import { wallDirection, wallLength } from '../geometry.js';
 import type { OpeningV2, PlanV2, Point, WallV2 } from '../types.js';
-import { WALL_TYPES } from '../validate.js';
+import { LENGTH_TOLERANCE, WALL_TYPES } from '../validate.js';
 import type { WallCommand } from './types.js';
 import {
-  checkDemolishable, checkThickness, checkWallLine, findWall, flipDoor, newId, openingsIn, readFields,
+  checkDemolishable, checkThickness, checkWallLine, cleanLength, findWall, flipDoor, newId, openingsIn, readFields,
   refuse, replaceOpenings, replaceWall, type Step,
 } from './support.js';
 
@@ -119,8 +119,8 @@ function moveWallEnd(plan: PlanV2, c: Extract<WallCommand, { op: 'move_wall_end'
   const next: WallV2 = c.end === 'a' ? { ...wall, a: [...c.to] } : { ...wall, b: [...c.to] };
   // Openings keep their position in the plan: moving `a` by s along the wall changes every offset by -s.
   const shift = c.end === 'a' ? s : 0;
-  const moved = openingsIn(plan, wall.id).map(o => ({ ...o, offset: o.offset - shift }));
-  for (const o of moved) if (o.offset < 0 || o.offset + o.width > newLength) refuse('to', 'opening-outside-wall', { openingId: o.id, wallLength: newLength, end: o.offset + o.width });
+  const moved = openingsIn(plan, wall.id).map(o => ({ ...o, offset: cleanLength(o.offset - shift) }));
+  for (const o of moved) if (o.offset < 0 || o.offset + o.width > newLength + LENGTH_TOLERANCE) refuse('to', 'opening-outside-wall', { openingId: o.id, wallLength: newLength, end: o.offset + o.width });
   return withRoomWarnings(plan, { plan: replaceOpenings(replaceWall(plan, next), moved) }, [wall.id]);
 }
 
@@ -128,12 +128,12 @@ function splitWall(plan: PlanV2, c: Extract<WallCommand, { op: 'split_wall' }>):
   readFields(c, { required: { wallId: 'id', at: 'point' }, optional: { newId: 'id' } });
   const wall = findWall(plan, c.wallId), s = along(wall, c.at);
   if (!onLine(wall, c.at) || s <= 0 || s >= wallLength(wall)) refuse('at', 'split-point-off-wall', { wallId: wall.id });
-  const inside = openingsIn(plan, wall.id).find(o => o.offset < s && s < o.offset + o.width);
+  const inside = openingsIn(plan, wall.id).find(o => o.offset < s - LENGTH_TOLERANCE && s < o.offset + o.width - LENGTH_TOLERANCE);
   if (inside) refuse('at', 'split-point-in-opening', { openingId: inside.id });
   const { id, notes } = newId(plan.walls, c.newId, wall.id, 'walls', 'newId');
   const first: WallV2 = { ...wall, b: [...c.at] }, second: WallV2 = { ...wall, id, a: [...c.at] };
   // Each opening goes to the piece that contains it; the second piece starts at the split point.
-  const moved = openingsIn(plan, wall.id).filter(o => o.offset >= s).map(o => ({ ...o, wallId: id, offset: o.offset - s }));
+  const moved = openingsIn(plan, wall.id).filter(o => o.offset >= s - LENGTH_TOLERANCE).map(o => ({ ...o, wallId: id, offset: cleanLength(o.offset - s) }));
   const walls = plan.walls.flatMap(w => w.id === wall.id ? [first, second] : [w]);
   return {
     plan: replaceOpenings({ ...plan, walls }, moved),
@@ -161,7 +161,7 @@ function joinWalls(plan: PlanV2, c: Extract<WallCommand, { op: 'join_walls' }>):
   // from the other end: its door hinge and swing change, so the door stays the same.
   const relocate = (o: OpeningV2, from: WallV2): OpeningV2 => {
     const fromForward = from.b[k] > from.a[k], start = fromForward ? from.a[k] + o.offset : from.a[k] - o.offset - o.width;
-    const moved = { ...o, wallId: wall.id, offset: forward ? start - lo : hi - (start + o.width) };
+    const moved = { ...o, wallId: wall.id, offset: cleanLength(forward ? start - lo : hi - (start + o.width)) };
     return fromForward === forward ? moved : flipDoor(moved);
   };
   const changed = [...openingsIn(plan, wall.id).map(o => relocate(o, wall)), ...openingsIn(plan, other.id).map(o => relocate(o, other))];
@@ -169,7 +169,7 @@ function joinWalls(plan: PlanV2, c: Extract<WallCommand, { op: 'join_walls' }>):
   // Where the two walls overlapped, their openings can overlap too.
   let reach: OpeningV2 | null = null;
   for (const o of [...changed].sort((p, q) => p.offset - q.offset)) {
-    if (reach && o.offset < reach.offset + reach.width) refuse('otherId', 'openings-overlap', { openingId: o.id, otherId: reach.id });
+    if (reach && o.offset < reach.offset + reach.width - LENGTH_TOLERANCE) refuse('otherId', 'openings-overlap', { openingId: o.id, otherId: reach.id });
     if (!reach || o.offset + o.width > reach.offset + reach.width) reach = o;
   }
   return withRoomWarnings(plan, { plan: next, notes: [{ code: 'walls-joined', params: { wallId: wall.id, removedWallId: other.id, movedOpeningIds: openingsIn(plan, other.id).map(o => o.id) } }] }, [wall.id, other.id]);
@@ -179,7 +179,7 @@ function reverseWall(plan: PlanV2, c: Extract<WallCommand, { op: 'reverse_wall' 
   readFields(c, { required: { wallId: 'id' } });
   const wall = findWall(plan, c.wallId), length = wallLength(wall);
   // offset becomes length − offset − width; doors change hinge end and swing side, so every door stays the same.
-  const changed = openingsIn(plan, wall.id).map(o => flipDoor({ ...o, offset: length - o.offset - o.width }));
+  const changed = openingsIn(plan, wall.id).map(o => flipDoor({ ...o, offset: cleanLength(length - o.offset - o.width) }));
   return { plan: replaceOpenings(replaceWall(plan, { ...wall, a: wall.b, b: wall.a }), changed) };
 }
 

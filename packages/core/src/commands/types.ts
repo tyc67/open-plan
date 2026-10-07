@@ -48,12 +48,34 @@ export type OpeningCommand =
   /** A new type with all its fields. Fields that the new type does not use are removed. */
   | ({ op: 'change_opening_type'; openingId: string } & OpeningTypeFields);
 
+export type RoomCommand =
+  /** A new room. `poly` is the outline on the inside face of its walls; `mat` must be a key of `materials`. */
+  | { op: 'add_room'; id?: string; name: string; mat: string; poly: Point[]; at?: Point; counted?: boolean }
+  | { op: 'update_room'; roomId: string; name?: string; mat?: string; poly?: Point[]; at?: Point; counted?: boolean }
+  | { op: 'delete_room'; roomId: string };
+
+export type FurnitureCommand =
+  /** A new item. `rot` defaults to 0. A missing `id` is generated. */
+  | { op: 'add_furniture'; id?: string; type: string; name: string; cx: number; cy: number; w: number; d: number; rot?: number; color?: string }
+  | { op: 'update_furniture'; furnitureId: string; type?: string; name?: string; cx?: number; cy?: number; w?: number; d?: number; rot?: number; color?: string }
+  /** Also removes the item's price from the cost estimate. */
+  | { op: 'delete_furniture'; furnitureId: string };
+
 export type PlanCommand =
   | { op: 'set_plan_name'; name: string }
   /** Creates or replaces one material by its key. */
-  | { op: 'set_material'; key: string; name: string; sw: string; price?: number };
+  | { op: 'set_material'; key: string; name: string; sw: string; price?: number }
+  /** 2000 to 6000 mm, and not below any opening head. */
+  | { op: 'set_ceiling_height'; ceilingHeight: number }
+  /**
+   * Scales the plan about a pivot (roadmap D3), either by `factor` about `pivot`, or so that the distance from `a` to
+   * `b` becomes `distance` (pivot `a`). Walls, openings along their walls, rooms, furniture positions, measurements and
+   * dimension chains scale; furniture size, heights, door hinge and swing, materials and prices do not.
+   */
+  | { op: 'scale_plan'; factor: number; pivot: Point }
+  | { op: 'scale_plan'; a: Point; b: Point; distance: number };
 
-export type Command = WallCommand | OpeningCommand | PlanCommand;
+export type Command = WallCommand | OpeningCommand | RoomCommand | FurnitureCommand | PlanCommand;
 export type CommandOp = Command['op'];
 
 // ---- Results ----

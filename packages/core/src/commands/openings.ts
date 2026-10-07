@@ -1,7 +1,7 @@
 import type { OpeningV2, PlanV2 } from '../types.js';
 import { DEFAULT_HEIGHTS, OPENING_TYPES } from '../validate.js';
 import type { OpeningCommand } from './types.js';
-import { checkHeights, checkOpening, findOpening, findWall, newId, readFields, refuse, replaceOpening, type FieldSpec, type Spec, type Step } from './support.js';
+import { checkHeights, checkOpening, cleanLength, findOpening, findWall, newId, readFields, refuse, replaceOpening, type FieldSpec, type Spec, type Step } from './support.js';
 
 const openingType = { enum: OPENING_TYPES };
 const hinge = { enum: ['start', 'end'] as const }, swing = { enum: ['left', 'right'] as const };
@@ -74,7 +74,7 @@ function resizeOpening(plan: PlanV2, c: Extract<OpeningCommand, { op: 'resize_op
   readFields(c, { required: { openingId: 'id', width: 'number' }, optional: { keep: { enum: ['start', 'end'] } } });
   const opening = findOpening(plan, c.openingId), wall = findWall(plan, opening.wallId);
   // `keep: 'end'` keeps the end edge in place, so the start moves by the change in width.
-  const offset = c.keep === 'end' ? opening.offset + opening.width - c.width : opening.offset;
+  const offset = c.keep === 'end' ? cleanLength(opening.offset + opening.width - c.width) : opening.offset;
   const next = { ...opening, offset, width: c.width };
   checkOpening(plan, next, wall, 'width');
   return { plan: replaceOpening(plan, next) };
