@@ -5,7 +5,8 @@ import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer
 import { createModelFactory } from './models.js';
 import { formatLength } from '../units.js';
 import { snapFurniture } from '../wallSnapping.js';
-import { wx, wz, planPoint } from './coordinates.js';
+import { cameraPose, createViewFrame, groundSize, shadowBox } from 'open-plan-core';
+import { wx, wz, planX, planY, setFrame } from './coordinates.js';
 
 function disposeGeometry(group) {
   group.traverse(o => o.geometry?.dispose());
@@ -36,12 +37,9 @@ export function createViewer(host, callbacks) {
   controls.enableDamping = true;
   controls.maxPolarAngle = Math.PI * .495;
   controls.minDistance = 1.5; controls.maxDistance = 60;
-  const resetCamera = () => { camera.position.set(10,16,13); controls.target.set(0,0,0); controls.update(); };
-  resetCamera();
   const hemi = new THREE.HemisphereLight(0xfff8ee,0xb9a88f,1.4);
   const sun = new THREE.DirectionalLight(0xfff1dd,2.6);
-  sun.position.set(-8,16,10); sun.castShadow = true; sun.shadow.mapSize.setScalar(2048);
-  Object.assign(sun.shadow.camera,{left:-11,right:11,top:11,bottom:-11,near:1,far:60});
+  sun.castShadow = true; sun.shadow.mapSize.setScalar(2048);
   sun.shadow.bias = -.0004; sun.shadow.normalBias = .02;
   const ground = new THREE.Mesh(new THREE.PlaneGeometry(100,100),new THREE.MeshStandardMaterial({color:'#f2eee7',roughness:1}));
   ground.rotation.x = -Math.PI/2; ground.position.y = -.02; ground.receiveShadow = true;
@@ -56,7 +54,23 @@ export function createViewer(host, callbacks) {
   scene.add(furniture,roomLabels);
   const models = new Map();
   let architecture = null, archSignature = '', selectedId = null, selectedRoomId = null, selectedWallId = null, roomPolygons = [], selection = null;
-  let currentDoc=null,snapEnabled=true,furnitureLocked=false,currentUnit='mm',snapGuide=null;
+  let currentDoc=null,lastOptions=null,snapEnabled=true,furnitureLocked=false,currentUnit='mm',snapGuide=null;
+  // The 3D frame (origin, camera, ground and shadow box) comes from the plan's physical bounds. It is set when a plan
+  // is first shown or replaced (a new plan id) and on 重設視角, never during a gesture, so edits do not move the scene.
+  let viewFrame=null,frameDocId=null;
+  function applyFrame(doc) {
+    viewFrame=createViewFrame(doc); frameDocId=doc.id; setFrame(viewFrame);
+    renderer.domElement.dataset.frameOrigin=viewFrame.origin.join(',');   // read by tools/checks/bounds.mjs
+    const size=groundSize(viewFrame); ground.scale.set(size/100,size/100,1);
+    const shadow=shadowBox(viewFrame); sun.position.set(...shadow.sunPosition);
+    Object.assign(sun.shadow.camera,{left:-shadow.half,right:shadow.half,top:shadow.half,bottom:-shadow.half,near:shadow.near,far:shadow.far});
+    sun.shadow.camera.updateProjectionMatrix();
+    const pose=cameraPose(viewFrame,camera.fov,camera.aspect);
+    camera.position.set(...pose.position); controls.target.set(...pose.target); controls.maxDistance=pose.maxDistance;
+    camera.far=pose.far; camera.updateProjectionMatrix(); controls.update();
+    archSignature='';
+  }
+  function resetCamera() { if(currentDoc&&!drag){ applyFrame(currentDoc); sync(currentDoc,lastOptions); } }
   function clearSnapGuide(){if(snapGuide){snapGuide.traverse(o=>{o.geometry?.dispose();o.material?.dispose();o.element?.remove();});snapGuide.removeFromParent();snapGuide=null;}}
   let disposed = false, frame = 0, pointerStart = null, drag = null;
   const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
@@ -87,7 +101,8 @@ export function createViewer(host, callbacks) {
   }
   function select(id,roomId,wallId) { selectedId=id; selectedRoomId=roomId;selectedWallId=wallId; updateSelection(); }
   function sync(doc, options) {
-    roomPolygons=doc.rooms;currentDoc=doc;snapEnabled=options.wallSnap;furnitureLocked=options.furnitureLocked;currentUnit=options.unit||'mm';
+    if(!drag&&(!viewFrame||doc.id!==frameDocId)) applyFrame(doc);
+    roomPolygons=doc.rooms;currentDoc=doc;lastOptions=options;snapEnabled=options.wallSnap;furnitureLocked=options.furnitureLocked;currentUnit=options.unit||'mm';
     if(drag&&(furnitureLocked||!options.furniture||!doc.furniture.some(f=>f.id===drag.id)))cancelDrag();
     const signature = JSON.stringify([doc.rooms,doc.walls,doc.openings,doc.ceilingHeight,options.cut,options.bearing]);
     if(signature !== archSignature) {
@@ -140,7 +155,7 @@ export function createViewer(host, callbacks) {
     const sample=groundAt({...e,clientX:e.clientX+1,clientY:e.clientY});
     const mmPerPixel=sample?sample.distanceTo(point)*1000:20;
     const target=point.clone().sub(drag.offset),f=currentDoc.furniture.find(f=>f.id===drag.id);
-    const snapped=snapFurniture(f,target.x*1000+6000,target.z*1000+5300,currentDoc,10*mmPerPixel,snapEnabled&&!e.altKey,!e.altKey);
+    const snapped=snapFurniture(f,planX(target.x),planY(target.z),currentDoc,10*mmPerPixel,snapEnabled&&!e.altKey,!e.altKey);
     drag.position={cx:snapped.cx,cy:snapped.cy};
     models.get(drag.id)?.group.position.set(wx(snapped.cx),0,wz(snapped.cy));
     clearSnapGuide();

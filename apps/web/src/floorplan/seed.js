@@ -107,11 +107,12 @@ const LIB = [
 ];
 const typeColor = t => { for (const c of LIB) for (const i of c.items) if (i[0]===t) return i[4]; return '#eee'; };
 
-let _n = 1;
-const uid = () => 'f' + Date.now().toString(36) + (_n++);
-const F = (type,name,cx,cy,w,d,rot=0,color) => ({id:uid(),type,name,cx,cy,w,d,rot,color:color||typeColor(type)});
+// Sample furniture IDs are fixed (sample-f1, sample-f2, ...): the 3D model details are seeded from the ID, so
+// every fresh sample must look the same. Items the user adds get random IDs from ids.js.
+let _n = 0;
+const F = (type,name,cx,cy,w,d,rot=0,color) => ({id:`sample-f${++_n}`,type,name,cx,cy,w,d,rot,color:color||typeColor(type)});
 
-function defaultFurniture(){ return [
+function defaultFurniture(){ _n = 0; return [
   // 主臥
   F('bed','雙人床',8300,1000,1800,2000,0,'#c9d6df'), F('nightstand','床頭櫃',7150,220,450,400), F('nightstand','床頭櫃',9450,220,450,400),
   F('wardrobe','衣櫃',8800,3070,2400,600,180), F('baycushion','飄窗墊',10770,1705,520,1800),

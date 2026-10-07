@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import ErrorBoundary from '../ErrorBoundary.jsx';
 import { createId } from './ids.js';
-import { planGeometry } from 'open-plan-core';
+import { fitBounds, planGeometry } from 'open-plan-core';
 import { RotateCw, Trash2 } from 'lucide-react';
 import WorkspaceShell from '../workspace/WorkspaceShell.jsx';
 import { createDocument } from './document.js';
@@ -11,7 +11,7 @@ import CostEstimate from './CostEstimate.jsx';
 import SnapGuides from './SnapGuides.jsx';
 import WallProperties, { canDemolish } from './WallProperties.jsx';
 import FurnitureAppearance from './FurnitureAppearance.jsx';
-import FloorPatterns, { floorPatternFill } from './FloorPatterns.jsx';
+import FloorPatterns, { RoomPatterns, roomFloorFill } from './FloorPatterns.jsx';
 import FurnitureSymbol from './FurnitureSymbol.jsx';
 import OpeningSymbols from './OpeningSymbols.jsx';
 import { snapFurniture } from './wallSnapping.js';
@@ -93,7 +93,11 @@ export default function FloorPlanEditor() {
   const [status,setStatus] = useState(initial.error || '準備就緒');
   const [history,setHistory] = useState({past:[],future:[]});
   const svg = useRef(null);
-  const {viewport,setViewport,zoom,zoomAt,setRatio,fit,ratio,scaleBar}=usePlanViewport(svg,view,unit);
+  const fitArea=fitBounds(doc);
+  const {viewport,setViewport,zoom,zoomAt,setRatio,fit,ratio,scaleBar}=usePlanViewport(svg,view,unit,fitArea,doc.id);
+  // The grid covers the fit area plus 3 times its larger side (at least 20 m) on each side, for zooming out and panning.
+  const gridPad=Math.max(20000,3*Math.max(fitArea[2]-fitArea[0],fitArea[3]-fitArea[1]));
+  const gridArea=[Math.floor((fitArea[0]-gridPad)/500)*500,Math.floor((fitArea[1]-gridPad)/500)*500,Math.ceil((fitArea[2]+gridPad)/500)*500,Math.ceil((fitArea[3]+gridPad)/500)*500];
   const drag = useRef(null);
   const touchRoom=useRef(null);
   useTouchNavigation(svg,view,setViewport,()=>{
@@ -285,9 +289,9 @@ export default function FloorPlanEditor() {
     costEstimate={<CostEstimate doc={doc} onChange={costEstimate=>commit({...doc,costEstimate})}/>} properties={wall?<WallProperties wall={wall} unit={unit} onToggle={toggleDemolition}/>:room?<RoomProperties nameLocked={layers.locked.roomNames} room={room} doc={doc} unit={unit} onPatch={patchRoom} onSelectFurniture={selectFurniture}/>:<div className="inspector">{item?<><h3>{item.name}</h3><FurnitureAppearance nameLocked={layers.locked.furnitureLabels} key={item.id} item={item} onPatch={patch}/>{[['cx','X'],['cy','Y'],['w','寬度'],['d','深度'],['rot','旋轉角度']].map(([key,label])=><label key={key}>{label}<div><input key={`${item.id}-${key}-${item[key]}-${unit}`} type="number" defaultValue={key==='rot'?item[key]:formatLength(item[key],unit)} min={key==='w'||key==='d'?10/unitFactor(unit):undefined} step={key==='rot'?1:10/unitFactor(unit)} onKeyDown={e=>{if(e.key==='Enter'&&!e.nativeEvent.isComposing)e.currentTarget.blur();}} onBlur={e=>{const shown=key==='rot'?String(item[key]):formatLength(item[key],unit),value=Number(e.target.value)*(key==='rot'?1:unitFactor(unit));if(e.target.value!==''&&Number(e.target.value)!==Number(shown)&&Number.isFinite(value)&&(!['w','d'].includes(key)||value>0)&&value!==item[key])patch({[key]:value});else e.target.value=shown;}}/><span>{key==='rot'?'°':unit}</span></div></label>)}<button onClick={()=>patch({rot:(item.rot+90)%360})}><RotateCw size={16}/>旋轉 90°</button><button onClick={()=>{commit({...doc,furniture:doc.furniture.filter(f=>f.id!==item.id)});setSelected(null);}}><Trash2 size={16}/>刪除家具</button></>:<p>選取家具或空間以查看及編輯屬性。</p>}<div className="note"><strong>編輯提示</strong><p>2D 與 3D 共用同一份平面圖。家具編輯會同步顯示。拖曳家具靠近牆面會吸附，按住 Alt / Option 暫停吸附。滾輪縮放、按住空白鍵拖曳平移；觸控以雙指縮放與平移；Esc 取消選取，Delete 刪除家具，⌘ / Ctrl + Z 復原，Shift + ⌘ / Ctrl + Z 重做。</p></div></div>}>
       {view==='3d'?<ErrorBoundary fallback={()=><div className="view-loading" role="alert"><div className="space-y-3 text-center"><p>無法載入 3D 檢視。平面圖資料未受影響；網路恢復後，請先儲存再重新整理頁面。</p><button type="button" className="rounded-lg border border-slate-300 px-3 py-1.5" onClick={()=>setView('2d')}>返回 2D</button></div></div>}><Suspense fallback={<div className="view-loading" role="status">載入 3D 檢視…</div>}><FloorPlan3D unit={unit} wallSnap={wallSnap} layers={layers} doc={doc} selected={selected} selectedRoom={room?.id} selectedWall={wall?.id} onSelectWall={selectWall} onSelectRoom={selectRoom} onSelect={selectFurniture} onMove={moveFurniture}/></Suspense></ErrorBoundary>:(
       <svg ref={svg} className={tool==='pan'||spacePan?'plan-svg pan-tool':tool==='measure'?'plan-svg measure-tool':'plan-svg'} viewBox={`${viewport.x} ${viewport.y} ${viewport.width} ${viewport.height}`} aria-label="Apartment floor plan" onPointerDownCapture={startMeasure} onContextMenu={e=>{if(tool==='measure'){e.preventDefault();cancelMeasure();}}} onPointerDown={startPan} onPointerMove={move} onPointerLeave={()=>{if(!measureGesture.current)setMeasurementSnap(null);}} onPointerUp={e=>finishDrag(e)} onPointerCancel={e=>finishDrag(e,true)}>
-        <defs><FloorPatterns/><pattern id="grid" width="500" height="500" patternUnits="userSpaceOnUse"><path d="M 500 0 L 0 0 0 500" fill="none" stroke="#dddcd5" strokeWidth="12"/></pattern></defs>
-        <rect x="-20000" y="-20000" width="55000" height="55000" fill="url(#grid)"/>
-        {doc.rooms.map(r=><polygon key={r.id} data-room-id={r.id} points={r.poly.map(p=>p.join(',')).join(' ')} fill={floorPatternFill(r.mat,doc.materials[r.mat]?.sw||'#eee')} onPointerDown={e=>{if(e.button===0&&tool==='select'&&!spaceHeld.current){e.stopPropagation();if(e.pointerType==='touch'){touchRoom.current={id:r.id,pointerId:e.pointerId,x:e.clientX,y:e.clientY};svg.current.setPointerCapture(e.pointerId);}else selectRoom(r.id);}}}/>)}
+        <defs><FloorPatterns/><RoomPatterns rooms={doc.rooms}/><pattern id="grid" width="500" height="500" patternUnits="userSpaceOnUse"><path d="M 500 0 L 0 0 0 500" fill="none" stroke="#dddcd5" strokeWidth="12"/></pattern></defs>
+        <rect x={gridArea[0]} y={gridArea[1]} width={gridArea[2]-gridArea[0]} height={gridArea[3]-gridArea[1]} fill="url(#grid)"/>
+        {doc.rooms.map((r,ri)=><polygon key={r.id} data-room-id={r.id} points={r.poly.map(p=>p.join(',')).join(' ')} fill={roomFloorFill(r,ri,doc.materials[r.mat]?.sw||'#eee')} onPointerDown={e=>{if(e.button===0&&tool==='select'&&!spaceHeld.current){e.stopPropagation();if(e.pointerType==='touch'){touchRoom.current={id:r.id,pointerId:e.pointerId,x:e.clientX,y:e.clientY};svg.current.setPointerCapture(e.pointerId);}else selectRoom(r.id);}}}/>)}
         {room&&<polygon className="selected-room-outline" points={room.poly.map(p=>p.join(',')).join(' ')} fill="#0d9488" fillOpacity=".08" stroke="#0d9488" strokeWidth="2" strokeDasharray="8 5" vectorEffect="non-scaling-stroke" pointerEvents="none"/>}
         {(layers.furniture?[...doc.furniture]:[]).sort((a,b)=>(a.type==='rug'?0:1)-(b.type==='rug'?0:1)).map(f=><g key={f.id} transform={`translate(${f.cx} ${f.cy}) rotate(${f.rot})`} onPointerDown={e=>startDrag(e,f)} className="furniture">
           <title>{f.name} · {formatLength(f.w,unit)} × {formatLength(f.d,unit)} {unit}</title>

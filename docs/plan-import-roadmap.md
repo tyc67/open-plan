@@ -158,11 +158,16 @@ All heights are in mm and are stored in the plan, not in code.
 
 ### A3. Bounds, empty plans and 3D limits
 
-- **Content bounds** include walls, openings, rooms, furniture (rotated bounds), measurements and dimension chains. Add a margin of 10% or 500 mm, whichever is larger.
+- **Two kinds of bounds** (`packages/core/src/bounds.ts`):
+  - **Content bounds:** walls, openings, rooms, furniture (rotated bounds), measurements and dimension chains. This is all that 2D shows.
+  - **Physical bounds:** walls, rooms and furniture only, with no measurements or dimension chains. This is all that 3D draws.
+- **Fit area (2D):** the content bounds plus a margin on each side. The margin on the left and on the right is each 10% of the content width, or 500 mm if that is larger. The margin at the top and at the bottom is each 10% of the content depth, or 500 mm if that is larger. Example: content 14 550 mm wide gets 1455 mm on the left and 1455 mm on the right.
 - **Empty plan:** use a default area of 10 × 8 m with its centre at (0, 0).
 - **Furniture-only plan:** the bounds come from the furniture.
-- **2D:** "Fit" and the default zoom use the content bounds.
-- **3D:** the centre, camera reset position, orbit target and maximum orbit distance come from the bounds. Ground size is the bounds plus a margin. The shadow camera fits the bounds.
+- **2D:** "Fit" and the default zoom use the fit area. The fit area is set when a plan loads, and "Fit" goes back to it.
+- **3D frame** (`packages/core/src/view-frame.ts`): the scene origin is the centre of the physical bounds. The camera reset position, orbit target, maximum orbit distance, far plane, ground size and shadow camera come from the physical bounds and the effective ceiling height.
+- **When the 3D frame changes:** only when a plan loads (first view or a different plan ID) and when the user clicks "Reset view". Edits, such as a furniture drag, do not move the frame, so the scene does not jump during or after a drag.
+- **Translation:** floor patterns are anchored at each room's top-left corner, and the random details of a furniture model come from its ID. So a moved plan looks the same.
 - **Large plans:** the shadow map has a fixed size, so shadows get softer on large plans. Accept this up to 100 × 100 m, and record the result. If it looks unacceptable, switch shadows off above a set size.
 - Move `wx`, `wz` and `planPoint` from constants to the viewer state.
 - Make dimension chains optional. A plan without them shows no dimension lines. Automatic chains are later work.
@@ -174,8 +179,9 @@ All heights are in mm and are stored in the plan, not in code.
 - **Migration:** a Vitest test converts the sample and converts the internal rects back. Every wall and opening rect is the same as in v1. The hinge formula gives back the v1 `h` for all 6 doors, and the swing matches `o`. Every generated piece has the type from the rule, `demolished: false`, and a report line.
 - **Sample heights:** the 3D pixel compare passes at cut heights 0.9 m and 2.8 m, so wall types on generated pieces change no rendered height or colour. When the bearing-wall layer gets a visible effect (L16), add it to the compare.
 - **Opening holes:** a test plan with one continuous wall and a window, a door, a sliding door and a hole shows four real holes in 3D, with correct sill and lintel heights.
-- **Offset:** a plan moved by (+20000, +20000) mm looks the same as the original in 2D and 3D, and 3D drag still snaps correctly.
-- **Size:** a 3 × 4 m room, a 30 × 20 m plan and a 100 × 100 m plan all fit the screen in 2D and 3D, and orbit can show the whole plan.
+- **Offset:** a plan moved by (+20000, +20000) mm looks the same as the original, and furniture still snaps flush to a moved wall with a 2D drag and with a 3D canvas drag (the 3D result is exactly the unmoved result + 20000 mm). The 3D frame does not change during or after a drag, and "Reset view" moves it to the new bounds. 3D is pixel-identical. In 2D, every element has the same screen box (to 0.01 px), and at most 0.25% of pixels change: Chrome rounds text and edges at the sub-pixel level from the absolute coordinates, so exact pixel identity is not possible there. Check: `tools/checks/bounds.mjs`.
+- **Size:** a 3 × 4 m room, a 30 × 20 m plan and a 100 × 100 m plan all fit the screen in 2D and 3D, and orbit can show the whole plan. Zoom out always shows a larger area: the minimum 2D scale is half the fit scale when that is below 0.012.
+- **Repeatable captures:** sample furniture has fixed IDs (3D details are seeded from the ID), so two independent captures are identical.
 - **Large-plan shadows:** for the 100 × 100 m plan, record shadow softness, visible artifacts (acne, banding, missing shadows at the edges) and frame rate. Then decide: keep shadows, or switch them off above a set size.
 - **Edge cases:** an empty plan and a furniture-only plan open with no error, and "Fit" works.
 - **Demolition:** demolishing a partition wall with a door removes the door hole and the door in 2D and 3D. Restoring the wall brings both back.

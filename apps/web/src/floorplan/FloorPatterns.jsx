@@ -1,7 +1,17 @@
 import { memo } from 'react';
 
 export const FLOOR_PATTERN_IDS=new Set(['wood','walnut','tile800','tile600','antislip','marble','terrazzo','carpet']);
-export const floorPatternFill=(id,fallback='#eee')=>FLOOR_PATTERN_IDS.has(id)?`url(#floor-${id})`:fallback;
+// Each room gets its own copy of its material pattern, anchored at the room's top-left corner. Patterns
+// anchored at the plan origin would shift inside a room when the whole plan moves.
+const roomPatternId=i=>`floor-room-${i}`;
+export const roomFloorFill=(room,i,fallback='#eee')=>FLOOR_PATTERN_IDS.has(room.mat)?`url(#${roomPatternId(i)})`:fallback;
+export const RoomPatterns=memo(function RoomPatterns({rooms}){
+  return rooms.map((r,i)=>{
+    if(!FLOOR_PATTERN_IDS.has(r.mat))return null;
+    const x=Math.min(...r.poly.map(p=>p[0])),y=Math.min(...r.poly.map(p=>p[1]));
+    return <pattern key={i} id={roomPatternId(i)} href={`#floor-${r.mat}`} patternTransform={`translate(${x} ${y})`}/>;
+  });
+});
 function Plank({id,base,line}) {
   return <pattern id={`floor-${id}`} patternUnits="userSpaceOnUse" width="1800" height="360">
     <rect width="1800" height="360" fill={base}/>
