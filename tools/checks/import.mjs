@@ -23,6 +23,8 @@ const formatDoc = await readFile(new URL('../../docs/plan-format.md', import.met
 const exampleText = /```json\n([\s\S]*?)```/.exec(formatDoc)[1];
 const example = JSON.parse(exampleText);
 const v1Sample = await readFile(new URL('../../packages/core/test/fixtures/sample-v1.json', import.meta.url), 'utf8');
+// A real export from the original v1 editor, with edits (packages/core/test/fixtures/README.md).
+const v1Export = await readFile(new URL('../../packages/core/test/fixtures/export-v1-9e1715d.json', import.meta.url), 'utf8');
 const file = (name, text) => ({ name, mimeType: 'application/json', buffer: Buffer.from(text) });
 
 const browser = await chromium.launch({ executablePath: CHROME, headless: true, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
@@ -40,6 +42,7 @@ try {
     await page.reload(); await page.waitForSelector('svg.plan-svg'); await settle();
   };
   const dialog = page.locator('[role=dialog]');
+  const undoSteps = () => page.evaluate(() => [...document.querySelectorAll('#history-content button')].filter(b => b.textContent.includes('步驟')).length);
   const importFile = async f => { await page.locator('[data-import-input]').setInputFiles(f); await dialog.waitFor(); };
   const confirm = async () => { await dialog.getByRole('button', { name: '取代目前平面圖' }).click(); await settle(); };
   const clipboard = () => page.evaluate(() => navigator.clipboard.readText());
@@ -193,6 +196,43 @@ try {
   check('fast edit: the backup has the edit', at(JSON.parse(await read(BACKUP)), 'sample-f1') === 8000);
   check('fast edit: the import replaced the plan', (await saved()).id === 'example');
 
+  const restoreSteps = await undoSteps();
+  await page.locator('[data-replace-notice]').getByRole('button', { name: '復原上一個平面圖' }).click(); await settle();
+  check('fast edit: restore brings back the plan with the edit', (await saved()).id !== 'example' && at(await saved(), 'sample-f1') === 8000);
+  check('fast edit: the restore is one undo step', await undoSteps() === restoreSteps + 1, `${restoreSteps} → ${await undoSteps()}`);
+
+  // 7b. A failed backup (storage full) stops the import: the plan, the undo history and the earlier backup do not change.
+  const beforeFail = await read(KEY), backupBeforeFail = await read(BACKUP), stepsBeforeFail = await undoSteps();
+  await page.evaluate(k => {
+    const original = Storage.prototype.setItem;
+    window.restoreSetItem = () => { Storage.prototype.setItem = original; };
+    Storage.prototype.setItem = function (key, value) {
+      if (key === k) throw new DOMException('The quota has been exceeded.', 'QuotaExceededError');
+      return original.call(this, key, value);
+    };
+  }, BACKUP);
+  await importFile(file('example.json', exampleText)); await confirm();
+  const failNotice = page.locator('[data-replace-notice][role=alert]');
+  check('import, failed backup: an error is shown', (await failNotice.count()) === 1 && (await failNotice.innerText()).includes('無法備份'));
+  check('import, failed backup: the plan is not replaced', (await read(KEY)) === beforeFail && (await saved()).id !== 'example');
+  check('import, failed backup: the undo history and the earlier backup are unchanged', await undoSteps() === stepsBeforeFail && (await read(BACKUP)) === backupBeforeFail, `${stepsBeforeFail} → ${await undoSteps()}`);
+  await page.evaluate(() => window.restoreSetItem());
+
+  // 7c. A real v1 export (from commit 9e1715d, with edits) imports and also opens from saved v1 storage, with no issue.
+  const v1Edits = plan => plan.schemaVersion === 2 && plan.name === 'v1 匯出測試' && plan.furniture.length === 47 &&
+    plan.furniture.some(f => f.id === '5ead59d8-0880-4e4a-9270-8874ffe79303') && same(plan.walls.filter(w => w.demolished).map(w => w.id), ['wall-26']) && plan.costEstimate?.wastePercent === 12.5;
+  await importFile(file('open-plan.json', v1Export));
+  check('real v1 export: the import dialog accepts it with the migration report', (await dialog.getAttribute('data-import-dialog')) === 'ok' && /24 項說明/.test(await dialog.innerText()));
+  await confirm();
+  check('real v1 export: imported as version 2 with the v1 edits', v1Edits(await saved()));
+  await openPanel();
+  check('real v1 export: no warnings after the import', (await page.locator('[data-plan-warnings] li').count()) === 0);
+  await load([[KEY, JSON.stringify(JSON.parse(v1Export))]]);
+  check('real v1 export from storage: it opens with no load error', !(await page.locator('[role=status]').first().innerText()).includes('無法載入'));
+  check('real v1 export from storage: saved as version 2 with the v1 edits, and no recovery copy', v1Edits(await saved()) && (await read(RECOVERY)) === null);
+  await openPanel();
+  check('real v1 export from storage: no warnings', (await page.locator('[data-plan-warnings] li').count()) === 0);
+
   // 8. Migrate, save, reload: a v1 plan with a tolerable issue shows the same warning both times; a blocking one does not open.
   const v1Tolerable = JSON.parse(v1Sample); v1Tolerable.rooms[0].mat = 'granite';
   const warnings = async () => { await openPanel(); return page.locator('[data-plan-warnings] li').allInnerTexts(); };
@@ -211,6 +251,13 @@ try {
   // 9. Keyboard: the dialog is modal. Focus starts in it, Tab and Shift+Tab stay in it, the background cannot take focus
   // or act, Escape closes it, and focus goes back to the control that opened it.
   await openSample(page); await settle(); await openPanel();
+  // Playwright makes Chrome intercept file choosers only while a 'filechooser' listener exists, and it turns this on
+  // asynchronously. keyboard.press is sent at once, so with waitForEvent alone the Enter could reach Chrome first;
+  // headless Chrome then closed the chooser at once (a 'cancel' event on the input) and no event came. That was the
+  // intermittent failure of this step (cause found 2026-10-08). One listener for the whole keyboard section, and a
+  // round trip after it, keep interception on before the first Enter.
+  const keepChoosersIntercepted = () => {};
+  page.on('filechooser', keepChoosersIntercepted); await page.evaluate(() => 0);
   const sampleNow = await read(KEY);
   const focusInDialog = () => page.evaluate(() => !!document.activeElement?.closest('[role=dialog]'));
   const importButton = page.getByRole('button', { name: '匯入平面圖' }).first();
@@ -241,6 +288,7 @@ try {
   await keyChooser2.setFiles(file('example.json', exampleText)); await dialog.waitFor();
   await page.keyboard.press('Enter'); await settle();
   check('keyboard: Enter on the first focused button replaces the plan', (await saved()).id === 'example' && (await dialog.count()) === 0);
+  page.off('filechooser', keepChoosersIntercepted);
 
   // 10. Delayed reads: only the newest file may show its result. A slow read that ends after a newer file, after
   // 取消 or after 取代目前平面圖 is ignored, also when it fails.
