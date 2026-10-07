@@ -415,6 +415,37 @@ Package name **not decided** (see Decisions and open questions). Examples use th
 - **Direct file edits** (an agent that writes `plan.json` itself) are supported but do not use the lock. For them the guarantee is weaker: a conflict is **detected when it is observed**. A direct write that happens between a protocol writer's revision check and its rename can still be lost. The guide tells agents to prefer `apply`, or to stop `serve` before direct edits, and to run `validate` after each edit.
 - **PNG:** from the SVG with a node image library, **2D only**. A 3D preview needs a headless browser, which is too heavy for this package. It is later work.
 
+**Decisions (C2 review, 2026-10-07):**
+
+- **Language:** TypeScript (`packages/cli`). **PNG:** `@resvg/resvg-js`, a CLI dependency.
+- **Two parts:** **C2a**: the package, `schema`, `validate`, `info`, `migrate`, `new`, `apply`, `backups`, `restore`, with revision, lock, atomic write and backups. **C2b**: `render`, the CLI loop test and the packed install test. `guide` waits for C4, `serve` is C3, `mcp` is C5.
+- **Revision:** the full SHA-256 (hex) of the file bytes as they are on disk.
+- **Policies:** `validate` and `migrate` are strict (import policy); `apply` uses the saved policy with the command refusals (C1).
+- **`apply`:** the commands file is `{ "expectedRevision": "...", "commands": [...] }`; a missing revision is refused. Read, revision check, backup and replacement happen under one lock.
+- **Lock** (`<plan>.lock`): created exclusively, complete from the start, with a random ownership token, hostname, PID and creation time.
+    - A live owner on this computer: wait up to 10 s, then `LOCK_TIMEOUT`.
+    - An owner process that is confirmed not to exist: `LOCK_STALE`. An owner whose state is not certain (another hostname, no permission to check the process, an unreadable lock file): `LOCK_UNCERTAIN`.
+    - Neither case removes or renames the lock. The message says to stop all writers first and then remove the lock file by hand. **Automatic stale-lock recovery is deferred:** a rename-based recovery is not exclusive, because another writer can take the lock path while the old lock is renamed away.
+    - Release checks the token and never removes a lock with another token.
+    - The guarantee is for **local file systems** only; exclusive creation is not reliable on some network file systems.
+- **Paths:** an existing plan path is resolved with `realpath` (symlinks, letter case); a new file uses the canonical parent folder and its name. A plan file with more than one hard link is refused (two names would get two locks). The checks run under the lock.
+- **Writes:** a temporary file in the same folder, synced to disk, then renamed over the plan. The backup is written and synced before the replacement; a failed backup refuses the write. Old backups are pruned to 20 only after the write; a pruning failure is reported as a successful write with a cleanup warning.
+- **`migrate` and `new`:** an existing destination is refused unless `--replace` is given; replacing makes a backup first.
+- **File format:** `JSON.stringify(plan, null, 2)` and a newline. This is not byte-identical to the web export, which has no final newline; a revision always reflects the bytes of the file.
+- **Exit codes:** 0 success; 1 validation errors or a refused change; 2 usage error; 3 `REVISION_CONFLICT`; 4 lock error (`LOCK_TIMEOUT`, `LOCK_STALE`, `LOCK_UNCERTAIN`); 5 input or output error. Structured codes keep operational errors apart from validation errors.
+- **Platforms:** macOS and Linux on local file systems first; **Windows is deferred.** Record what was actually tested.
+- **`render` (C2b):** the stored reference PNG is geometry only, with all text off (a new SVG option `text: false` removes every text element and keeps the dimension lines), compared by decoded pixels. CJK labels are tested separately with a small committed subset of Noto Sans TC (OFL), with its licence and reproducible generation steps (source version and hash). Production rendering uses the system fonts.
+- **Packed install (C2b):** core, the schema and the format description are bundled into the CLI with esbuild, so the installed CLI needs no workspace package or repository file; resvg stays an npm dependency.
+
+**Implementation (C2a):**
+
+- **Package:** `packages/cli` (private `open-plan-cli`, temporary command `open-plan` until the scope is chosen). `src/operations.ts` returns structured results that the MCP server (C5) can use too; `src/cli.ts` parses arguments with `node:util` and prints text or `--json`; `src/lock.ts` and `src/files.ts` hold the lock, the synced writes and the backups. The schema and `plan-format.md` are copied into `dist/assets` at build time, so the CLI does not read repository files at run time.
+- **Commands:** `schema`, `validate`, `info`, `new`, `migrate`, `apply`, `backups`, `restore`, as in the table above. `validate` on a v1 file checks it through the migration and says to run `migrate`. `info` works on a plan with tolerable issues and lists them as warnings. `apply` on a v1 file is refused (`NOT_VERSION_2`). `restore` takes only a name from `backups`, writes the backup bytes unchanged, and refuses a backup that is not a readable plan: a v1 backup must pass the complete migration and the saved-policy v2 validation, not only the preliminary document check. `migrate` with the same file as source and destination (also through a symlink) reads and converts the file under the plan lock. `apply` compares the normalized starting plan with the result: a batch that changes nothing keeps the bytes and revision of the file in any format (minified, web export) and makes no backup.
+- **Lock race found by the 100-writer test:** a writer could read a lock, the owner then released it and exited, and the writer then saw a dead process and reported `LOCK_STALE` for a lock that was released correctly (13 of 100 writers). A dead process cannot release a lock later, so after a dead owner is seen the lock file is read again: `LOCK_STALE` only if the same token is still there; otherwise the writer tries again.
+- **Lock wait cost found by the same test:** each retry wrote and synced a new temporary lock file, so 100 waiters slowed the owner and the last writer finished after about 9.7 s, near the 10 s `LOCK_TIMEOUT` (2 of 100 timed out in one full run). Each writer now writes and syncs its lock content once, and a retry is one `link`. The last of 100 writers now finishes after about 1 to 1.5 s.
+- **Tested:** macOS 26 (APFS, local disk) with Node 24 only. **Linux is not tested yet.** Windows is deferred.
+- **Check:** `packages/cli/test` (Vitest, which builds core and the CLI first and runs the built CLI): every command and exit code; revision, backup bytes and pruning to 20; a failed backup and a failed pruning; in-place migration while another writer changes the file (direct and through a symlink); v1 backups that pass the preliminary check but not the migration; a batch that changes nothing on minified and web-export files; symlink aliases on one lock; hard-link refusal; `LOCK_STALE` and `LOCK_UNCERTAIN` that leave the lock unchanged; release that keeps another writer's lock; 100 parallel `apply` calls with one starting revision (exactly one success, 99 `REVISION_CONFLICT`, one backup, no temporary or lock file left).
+
 ### C3. Live file mode (`<cli> serve`)
 
 - Serves the built editor and the plan file on `http://127.0.0.1:<port>`, and opens the browser.
