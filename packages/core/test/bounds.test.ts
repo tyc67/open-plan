@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { EMPTY_PLAN_AREA, contentBounds, fitBounds, migrateV1, physicalBounds } from '../src/index.js';
+import { EMPTY_PLAN_AREA, contentBounds, fitBounds, migrateV1, physicalBounds, summarizePlan } from '../src/index.js';
 import type { PlanV1, PlanV2 } from '../src/index.js';
 import sampleJson from './fixtures/sample-v1.json' with { type: 'json' };
 
@@ -51,3 +51,13 @@ describe('bounds rules', () => {
 });
 
 export { translate };
+
+describe('summarizePlan', () => {
+  it('counts the items and gives the content size in metres', () => {
+    const plan = sample();
+    expect(summarizePlan(plan)).toEqual({ walls: plan.walls.length, openings: plan.openings.length, rooms: 13, furniture: 46, width: 14.55, depth: 13.1 });
+  });
+  it('gives a size of 0 for an empty plan', () => {
+    expect(summarizePlan(empty())).toMatchObject({ walls: 0, furniture: 0, width: 0, depth: 0 });
+  });
+});

@@ -4,6 +4,7 @@ import { chromium } from 'playwright-core';
 import { readFile } from 'node:fs/promises';
 import * as THREE from '../../apps/web/node_modules/three/build/three.module.js';
 import { cameraPose, createViewFrame, fitBounds, toSceneX, toSceneZ } from '../../packages/core/dist/index.js';
+import { openSample } from './sample-plan.mjs';
 
 const url = process.argv[2];
 if (!url) { console.error('Usage: node tools/checks/replace.mjs <url>'); process.exit(2); }
@@ -46,9 +47,7 @@ try {
   };
 
   await page.goto(url);
-  await page.evaluate(([k, v]) => { localStorage.clear(); localStorage.setItem(k, v); }, [RECOVERY, H2_SENTINEL]);
-  await page.reload();
-  await page.waitForSelector('svg.plan-svg');
+  await openSample(page, [[RECOVERY, H2_SENTINEL]]);
   await settle();
   await page.getByRole('button', { name: 'Open Plan 專案設定' }).click();
   const fresh = await saved();

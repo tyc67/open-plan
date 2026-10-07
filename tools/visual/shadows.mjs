@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { PNG } from 'pngjs';
 import * as THREE from '../../apps/web/node_modules/three/build/three.module.js';
 import { cameraPose, createViewFrame, shadowBox, toSceneX, toSceneZ } from '../../packages/core/dist/index.js';
+import { openSample } from '../checks/sample-plan.mjs';
 
 const [url, outDir] = process.argv.slice(2);
 if (!url || !outDir) { console.error('Usage: node tools/visual/shadows.mjs <url> <out-dir>'); process.exit(2); }
@@ -30,9 +31,7 @@ const lines = [];
 try {
   const page = await (await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2, reducedMotion: 'reduce' })).newPage();
   await page.goto(url);
-  await page.evaluate(() => localStorage.clear()); await page.reload(); await page.waitForSelector('svg.plan-svg');
-  await page.waitForTimeout(800);
-  const sample = JSON.parse(await page.evaluate(k => localStorage.getItem(k), KEY));
+  const sample = await openSample(page);
   const canvas = page.locator('[aria-label="3D floor-plan view"] canvas');
   const open = async plan => {
     await page.evaluate(([k, v]) => { localStorage.clear(); localStorage.setItem(k, v); }, [KEY, JSON.stringify(plan)]);

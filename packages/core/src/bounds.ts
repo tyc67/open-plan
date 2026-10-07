@@ -55,3 +55,13 @@ export function fitBounds(plan: PlanV2): Rect {
   const mx = Math.max((r[2] - r[0]) * 0.1, 500), my = Math.max((r[3] - r[1]) * 0.1, 500);
   return [r[0] - mx, r[1] - my, r[2] + mx, r[3] + my];
 }
+
+/** What an import shows before it replaces the open plan: item counts and the size of all content in metres. */
+export interface PlanSummary { walls: number; openings: number; rooms: number; furniture: number; width: number; depth: number }
+export function summarizePlan(plan: PlanV2): PlanSummary {
+  const r = contentBounds(plan);
+  return {
+    walls: plan.walls.length, openings: plan.openings.length, rooms: plan.rooms.length, furniture: plan.furniture.length,
+    width: r ? (r[2] - r[0]) / 1000 : 0, depth: r ? (r[3] - r[1]) / 1000 : 0,
+  };
+}

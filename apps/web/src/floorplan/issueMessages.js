@@ -28,6 +28,8 @@ const heightText = p => p.min !== undefined && p.max !== undefined ? `高度 ${m
 const TEXT = {
   'json-invalid': () => '資料不是有效的 JSON',
   'v1-unreadable': () => '舊版（v1）資料無法轉換為目前的格式',
+  'file-too-large': () => '檔案大於 20 MB，不是平面圖檔案',
+  'file-unreadable': () => '無法讀取檔案',
   'type-invalid': p => `格式不對，應為 ${p.expected}`,
   'missing-field': p => `缺少必要欄位（${p.expected}）`,
   'enum-invalid': p => `不是可用的值，可用：${p.allowed.join('、')}`,
@@ -64,4 +66,27 @@ export function issueMessages(issues, max = 20) {
   const lines = issues.slice(0, max).map(issueMessage);
   if (issues.length > max) lines.push(`還有 ${issues.length - max} 個未列出（共 ${issues.length} 個）`);
   return lines;
+}
+
+// zh-TW text for the notes of the v1 migration report (open-plan-core migrateV1). The notes have no parameters, so the
+// text is general; the English message has the numbers and stays visible below it.
+const REPORT = {
+  'wall-type-unknown': '不明的牆體類型已改為隔間牆（n）',
+  'opening-wall-created': '已在開口位置建立一段牆',
+  'opening-wall-low': '開口所在的牆是矮牆，上方不畫過梁',
+  'neighbour-demolished': '相鄰的牆已標記拆除，開口仍保留，請檢查',
+  'door-hinge-not-at-end': '舊版鉸鏈不在開口的一端，已改到最近的一端',
+  'door-hinge-moved': '鉸鏈位置已移動',
+  'door-closed-direction': '舊版門的關閉方向不是從鉸鏈指向開口',
+  'door-swing-not-normal': '舊版開門方向和牆不垂直，已改為最接近的一側',
+  'door-length-changed': '舊版門扇長度已改為開口寬度',
+  'sample-bay-holes-not-applicable': '沒有範例的凸窗牆，未加入凸窗開口',
+  'sample-bay-holes-skipped': '有牆或開口和範例凸窗重疊，未加入凸窗開口',
+  'sample-bay-hole-created': '已加入範例凸窗的開口（舊版只有固定的過梁）',
+};
+
+/** One migration note as zh-TW text with the ids it names, for example "開口 d1，牆 d1--wall：鉸鏈位置已移動". */
+export function reportMessage({ code, openingId, wallId, message }) {
+  const ids = [openingId && `開口 ${openingId}`, wallId && `牆 ${wallId}`].filter(Boolean).join('，');
+  return `${ids ? `${ids}：` : ''}${REPORT[code] ?? message}`;
 }

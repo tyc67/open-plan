@@ -5,7 +5,7 @@ import { createViewer } from './three/viewer.js';
 // Metres. Both are below the lowest effective ceiling (2000 mm), so "full" is always the highest.
 const CUT_HEIGHTS={low:.9,mid:1.5};
 
-export default function FloorPlan3D({unit,wallSnap,layers,doc,selected,selectedRoom,selectedWall,onSelectWall,onSelectRoom,onSelect,onMove,dragToken,controlRef}) {
+export default function FloorPlan3D({unit,wallSnap,layers,doc,selected,selectedRoom,selectedWall,onSelectWall,onSelectRoom,onSelect,onMove,dragToken,controlRef,frameKey}) {
   const host=useRef(null), viewer=useRef(null);
   const latest=useRef({onSelect,onSelectRoom,onSelectWall,onMove}); latest.current={onSelect,onSelectRoom,onSelectWall,onMove,dragToken};
   const [error,setError]=useState('');
@@ -28,9 +28,9 @@ export default function FloorPlan3D({unit,wallSnap,layers,doc,selected,selectedR
     return ()=>{if(controlRef)controlRef.current=null;viewer.current?.dispose();viewer.current=null;};
   },[]);
   useEffect(()=>{
-    try { viewer.current?.sync(doc,{cut,unit,wallSnap,bearing:layers.bearing,furnitureLocked:layers.locked.furniture,furniture:layers.furniture,roomNames:layers.roomNames,areas:layers.areas}); viewer.current?.select(selected,selectedRoom,selectedWall); }
+    try { viewer.current?.sync(doc,{frameKey:frameKey??doc.id,cut,unit,wallSnap,bearing:layers.bearing,furnitureLocked:layers.locked.furniture,furniture:layers.furniture,roomNames:layers.roomNames,areas:layers.areas}); viewer.current?.select(selected,selectedRoom,selectedWall); }
     catch(e) { setError(`Could not render the 3D plan: ${e.message}. You can continue editing in 2D.`); }
-  },[doc,cut,unit,wallSnap,layers,selected,selectedRoom,selectedWall]);
+  },[doc,frameKey,cut,unit,wallSnap,layers,selected,selectedRoom,selectedWall]);
   return <section className="view3d" aria-label="3D floor-plan view">
     <div className="three-host" ref={host}/>
     {error?<div className="three-error" role="alert">{error}</div>:<>

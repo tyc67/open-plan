@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { PNG } from 'pngjs';
 import * as THREE from '../../apps/web/node_modules/three/build/three.module.js';
 import { cameraPose, contentBounds, createViewFrame, toSceneX, toSceneZ } from '../../packages/core/dist/index.js';
+import { openSample } from './sample-plan.mjs';
 
 const [url, imageDir] = process.argv.slice(2);
 if (!url) { console.error('Usage: node tools/checks/bounds.mjs <url> [image-dir]'); process.exit(2); }
@@ -53,10 +54,7 @@ try {
   const errors = [];
   page.on('pageerror', e => errors.push(e.message));
   await page.goto(url);
-  await page.evaluate(() => localStorage.clear());
-  await page.reload();
-  await page.waitForFunction(k => localStorage.getItem(k), KEY);
-  const sample = JSON.parse(await page.evaluate(k => localStorage.getItem(k), KEY));
+  const sample = await openSample(page);
 
   const load = async plan => {
     await page.evaluate(([k, s]) => { localStorage.clear(); localStorage.setItem(k, s); }, [KEY, JSON.stringify(plan)]);

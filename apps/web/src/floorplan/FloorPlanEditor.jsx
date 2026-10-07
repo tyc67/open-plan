@@ -6,6 +6,8 @@ import { RotateCw, Trash2 } from 'lucide-react';
 import WorkspaceShell from '../workspace/WorkspaceShell.jsx';
 import { createDocument, createEmptyDocument } from './document.js';
 import { backupBeforeReplace, loadDocument, preserveUnreadableDocument, replacedDocument, saveDocument } from './storage.js';
+import { readImportFile } from './planFile.js';
+import { AGENT_PROMPT } from './agentPrompt.js';
 import { LIB } from './seed.js';
 import CostEstimate from './CostEstimate.jsx';
 import SnapGuides from './SnapGuides.jsx';
@@ -32,12 +34,13 @@ const warningNotice=(count,prefix)=>({tone:'warning',text:`${prefix}這個平面
 function initialState() {
   try {
     const loaded = loadDocument();
-    if (!loaded) return { doc: createDocument(), error: '', loadErrors: [], notice: null };
+    // A new user starts with an empty plan; the canvas then offers Import and Load sample apartment (roadmap B3).
+    if (!loaded) return { doc: createEmptyDocument(), error: '', loadErrors: [], notice: null };
     return { doc: loaded.plan, error: '', loadErrors: [], notice: loaded.warnings.length ? warningNotice(loaded.warnings.length, '') : null };
   }
   catch (error) {
     const kept = preserveUnreadableDocument();
-    return { doc: createDocument(), loadErrors: error.issues || [], notice: null,
+    return { doc: createEmptyDocument(), loadErrors: error.issues || [], notice: null,
       error: `無法載入已儲存的平面圖：${error.message}。${kept ? '原始資料已另存備份；' : '原始資料未能備份；'}自動儲存已暫停，按「儲存到此裝置」會覆寫並恢復自動儲存。` };
   }
 }
@@ -101,7 +104,11 @@ export default function FloorPlanEditor() {
   const [history,setHistory] = useState({past:[],future:[]});
   const svg = useRef(null);
   const fitArea=fitBounds(doc);
-  const {viewport,setViewport,zoom,zoomAt,setRatio,fit,ratio,scaleBar}=usePlanViewport(svg,view,unit,fitArea,doc.id);
+  // Each replacement or restore counts as a new load, so the view fits the plan and the 3D frame is set again, also
+  // when the new plan has the same id (an exported plan imported again, or a second restore).
+  const [planLoads,setPlanLoads]=useState(0);
+  const planKey=`${doc.id}:${planLoads}`;
+  const {viewport,setViewport,zoom,zoomAt,setRatio,fit,ratio,scaleBar}=usePlanViewport(svg,view,unit,fitArea,planKey);
   // The grid covers the fit area plus 3 times its larger side (at least 20 m) on each side, for zooming out and panning.
   const gridPad=Math.max(20000,3*Math.max(fitArea[2]-fitArea[0],fitArea[3]-fitArea[1]));
   const gridArea=[Math.floor((fitArea[0]-gridPad)/500)*500,Math.floor((fitArea[1]-gridPad)/500)*500,Math.ceil((fitArea[2]+gridPad)/500)*500,Math.ceil((fitArea[3]+gridPad)/500)*500];
@@ -313,13 +320,13 @@ export default function FloorPlanEditor() {
       setReplaceNotice({tone:'error',text:`無法備份目前的平面圖（${error.message}），所以沒有取代。可先下載目前的平面圖。`,actions:[['下載目前平面圖',()=>downloadPlan(current)]]});
       return;
     }
-    clearSelection();commit(next,current);setCanRestore(true);
+    clearSelection();commit(next,current);setCanRestore(true);setPlanLoads(n=>n+1);
     setReplaceNotice({tone:'info',text:message,actions:[['復原上一個平面圖',restorePrevious]]});
   }
   function restorePrevious() {
     const current=settleEditor(),previous=replacedDocument();
     if(!previous){setCanRestore(false);setReplaceNotice({tone:'error',text:'找不到上一個平面圖的備份，或備份已損壞。',actions:[]});return;}
-    clearSelection();commit(previous.plan,current);
+    clearSelection();commit(previous.plan,current);setPlanLoads(n=>n+1);
     const count=previous.warnings.length;
     setReplaceNotice({tone:count?'warning':'info',text:`已復原上一個平面圖。這一步也可以用「復原」取消。${count?`這個平面圖有 ${count} 個需要注意的地方，清單在「平面圖設定」。`:''}`,actions:[['復原上一個平面圖',restorePrevious]]});
   }
@@ -327,7 +334,30 @@ export default function FloorPlanEditor() {
   const [replaceNotice,setReplaceNotice]=useState(initial.notice);
   // Tolerable issues of the open plan, checked again after each change, so the list is never out of date.
   const planWarnings=useMemo(()=>validatePlan(doc,'saved').warnings,[doc]);
+  // Import (roadmap B3): read and check the file, show the summary or the errors, and replace only after confirmation.
+  const IMPORT_MAX_BYTES=20*1024*1024;
+  const [importState,setImportState]=useState(null);
+  // Each import request gets a number. A file read finishes later, so only the newest request may show its result;
+  // cancel and confirm also end every pending read. Without this, a slow first file replaces the preview of a second.
+  const importRequest=useRef(0);
+  async function importFile(file) {
+    if(!file)return;
+    const request=++importRequest.current;
+    const show=result=>{if(request===importRequest.current)setImportState({fileName:file.name,result});};
+    const failed=code=>show({ok:false,errors:[{path:'$',code,params:{}}],report:[]});
+    if(file.size>IMPORT_MAX_BYTES){failed('file-too-large');return;}
+    let text;
+    try {text=await file.text();} catch {failed('file-unreadable');return;}
+    show(readImportFile(text));
+  }
+  function closeImport() {importRequest.current++;setImportState(null);}
+  function confirmImport() {
+    const pending=importState;closeImport();
+    if(pending?.result.ok)replacePlan(pending.result.plan,`已匯入「${pending.fileName}」。上一個平面圖已備份。`);
+  }
   const planActions={
+    onImportFile:importFile,importState,onConfirmImport:confirmImport,onCancelImport:closeImport,
+    agentPrompt:AGENT_PROMPT,isEmpty:!doc.walls.length&&!doc.rooms.length&&!doc.furniture.length,
     onNewPlan:()=>replacePlan(createEmptyDocument(),'已建立新的空白平面圖。上一個平面圖已備份。'),
     onLoadSample:()=>replacePlan(createDocument(),'已載入範例公寓。上一個平面圖已備份。'),
     onRestorePrevious:restorePrevious,canRestore,
@@ -342,7 +372,7 @@ export default function FloorPlanEditor() {
     wallSnap={wallSnap} onToggleWallSnap={()=>setWallSnap(value=>!value)} layers={layers} onToggleLayer={toggleLayer} onToggleLayerLock={toggleLayerLock} onClearMeasurements={clearMeasurements} onDeleteMeasurement={deleteMeasurement} showDimensions={layers.dimensions} onToggleDimensions={()=>toggleLayer('dimensions')}
     library={<div className="library"><p>選擇家具加入圖面，再拖曳至所需位置。</p>{LIB.map(category=><details key={category.cat} open><summary>{category.cat}</summary><div className="catalog">{category.items.map((entry,i)=><button key={i} disabled={layers.locked.furniture} onClick={()=>add(entry)}><span>{entry[1]}</span><small>{formatLength(entry[2],unit)} × {formatLength(entry[3],unit)} {unit}</small></button>)}</div></details>)}</div>}
     costEstimate={<CostEstimate doc={doc} onChange={costEstimate=>commit({...doc,costEstimate})}/>} properties={wall?<WallProperties wall={wall} unit={unit} onToggle={toggleDemolition}/>:room?<RoomProperties nameLocked={layers.locked.roomNames} room={room} doc={doc} unit={unit} onPatch={patchRoom} onSelectFurniture={selectFurniture}/>:<div className="inspector">{item?<><h3>{item.name}</h3><FurnitureAppearance nameLocked={layers.locked.furnitureLabels} key={item.id} item={item} onPatch={patch}/>{[['cx','X'],['cy','Y'],['w','寬度'],['d','深度'],['rot','旋轉角度']].map(([key,label])=><label key={key}>{label}<div><input key={`${item.id}-${key}-${item[key]}-${unit}`} type="number" defaultValue={key==='rot'?item[key]:formatLength(item[key],unit)} min={key==='w'||key==='d'?10/unitFactor(unit):undefined} step={key==='rot'?1:10/unitFactor(unit)} onKeyDown={e=>{if(e.key==='Enter'&&!e.nativeEvent.isComposing)e.currentTarget.blur();}} onBlur={e=>{const shown=key==='rot'?String(item[key]):formatLength(item[key],unit),value=Number(e.target.value)*(key==='rot'?1:unitFactor(unit));if(e.target.value!==''&&Number(e.target.value)!==Number(shown)&&Number.isFinite(value)&&(!['w','d'].includes(key)||value>0)&&value!==item[key])patch({[key]:value});else e.target.value=shown;}}/><span>{key==='rot'?'°':unit}</span></div></label>)}<button onClick={()=>patch({rot:(item.rot+90)%360})}><RotateCw size={16}/>旋轉 90°</button><button onClick={()=>{commit({...doc,furniture:doc.furniture.filter(f=>f.id!==item.id)});setSelected(null);}}><Trash2 size={16}/>刪除家具</button></>:<p>選取家具或空間以查看及編輯屬性。</p>}<div className="note"><strong>編輯提示</strong><p>2D 與 3D 共用同一份平面圖。家具編輯會同步顯示。拖曳家具靠近牆面會吸附，按住 Alt / Option 暫停吸附。滾輪縮放、按住空白鍵拖曳平移；觸控以雙指縮放與平移；Esc 取消選取，Delete 刪除家具，⌘ / Ctrl + Z 復原，Shift + ⌘ / Ctrl + Z 重做。</p></div></div>}>
-      {view==='3d'?<ErrorBoundary fallback={()=><div className="view-loading" role="alert"><div className="space-y-3 text-center"><p>無法載入 3D 檢視。平面圖資料未受影響；網路恢復後，請先儲存再重新整理頁面。</p><button type="button" className="rounded-lg border border-slate-300 px-3 py-1.5" onClick={()=>setView('2d')}>返回 2D</button></div></div>}><Suspense fallback={<div className="view-loading" role="status">載入 3D 檢視…</div>}><FloorPlan3D unit={unit} wallSnap={wallSnap} layers={layers} doc={doc} selected={selected} selectedRoom={room?.id} selectedWall={wall?.id} onSelectWall={selectWall} onSelectRoom={selectRoom} onSelect={selectFurniture} onMove={moveFurniture} dragToken={()=>planGeneration.current} controlRef={view3d}/></Suspense></ErrorBoundary>:(
+      {view==='3d'?<ErrorBoundary fallback={()=><div className="view-loading" role="alert"><div className="space-y-3 text-center"><p>無法載入 3D 檢視。平面圖資料未受影響；網路恢復後，請先儲存再重新整理頁面。</p><button type="button" className="rounded-lg border border-slate-300 px-3 py-1.5" onClick={()=>setView('2d')}>返回 2D</button></div></div>}><Suspense fallback={<div className="view-loading" role="status">載入 3D 檢視…</div>}><FloorPlan3D unit={unit} wallSnap={wallSnap} layers={layers} doc={doc} selected={selected} selectedRoom={room?.id} selectedWall={wall?.id} onSelectWall={selectWall} onSelectRoom={selectRoom} onSelect={selectFurniture} onMove={moveFurniture} dragToken={()=>planGeneration.current} controlRef={view3d} frameKey={planKey}/></Suspense></ErrorBoundary>:(
       <svg ref={svg} className={tool==='pan'||spacePan?'plan-svg pan-tool':tool==='measure'?'plan-svg measure-tool':'plan-svg'} viewBox={`${viewport.x} ${viewport.y} ${viewport.width} ${viewport.height}`} aria-label="Apartment floor plan" onPointerDownCapture={startMeasure} onContextMenu={e=>{if(tool==='measure'){e.preventDefault();cancelMeasure();}}} onPointerDown={startPan} onPointerMove={move} onPointerLeave={()=>{if(!measureGesture.current)setMeasurementSnap(null);}} onPointerUp={e=>finishDrag(e)} onPointerCancel={e=>finishDrag(e,true)}>
         <defs><FloorPatterns/><RoomPatterns rooms={doc.rooms}/><pattern id="grid" width="500" height="500" patternUnits="userSpaceOnUse"><path d="M 500 0 L 0 0 0 500" fill="none" stroke="#dddcd5" strokeWidth="12"/></pattern></defs>
         <rect x={gridArea[0]} y={gridArea[1]} width={gridArea[2]-gridArea[0]} height={gridArea[3]-gridArea[1]} fill="url(#grid)"/>

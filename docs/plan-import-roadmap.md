@@ -259,6 +259,19 @@ One validator is used for saved documents at load, for imports, by the CLI and M
 - **Privacy text** (task), beside the agent prompt and beside image import (D1), in zh-TW in the UI: "Open Plan does not upload your image. Website mode stores it in this browser; local file mode stores it on your computer. If you give the image to an AI agent, that agent handles it."
 - This step also lets you **move a plan between computers** (export on one, import on the other).
 
+**Implementation (B3):**
+
+- **First plan:** with no saved plan, the editor opens an empty plan. On the canvas, a card offers 匯入平面圖, 載入範例公寓 and 複製 AI 提示. It goes away when the plan has walls, rooms or furniture. A saved plan that cannot load (H2) also opens an empty plan, no longer the sample.
+- **Import entry points:** 匯入 in the header, 匯入平面圖（JSON） in the plan panel, the empty-plan card, and a file dropped anywhere on the workspace (an overlay shows while a file is over it). Only drags that carry files are taken. Files over 20 MB are refused before they are read.
+- **Reading:** `apps/web/src/floorplan/planFile.js`. `readImportFile` parses the text, migrates a v1 file with the A1 rules (`migrateV1Document`, also used by storage), and validates with the **import** policy. A v1 file is first checked with the v1 rules and then validated as v2, so a tolerable issue in a v1 file is also an import error.
+- **Dialog:** on success, the counts, the size in metres (`summarizePlan` in core, from `contentBounds`), the v1 report grouped by code (zh-TW text, the English note below it), and the note that the current plan is backed up first; 取代目前平面圖 replaces through B1. On failure, the first 20 errors and the count, and 複製錯誤訊息 copies all errors with their paths. Escape, 取消 and 關閉 close it, and the plan does not change. The dialog is modal: the header, the workspace and the cost panel are inert, Tab and Shift+Tab wrap inside it, the editor's shortcuts do not act, and focus goes back to the control that opened it.
+- **Late file reads:** each import request has a number, and only the newest request can show its result, success or failure. 取消 and 取代目前平面圖 end every pending read, so a slow file cannot replace a newer preview or open a dialog after it closes.
+- **Plan id:** import keeps the id of the file, so an export imports again with no change. A replacement or restore is therefore counted (`planLoads`), and the 2D fit and the 3D frame use the key `id:count`, not the id alone. An import of the same plan fits the view and resets the 3D camera.
+- **Published description:** `docs/plan-format.md` (the field meanings and the example above, with an `id`, which the schema requires). A Vitest test checks that its example passes the schema and the import validator with no issue.
+- **Agent prompt:** `apps/web/src/floorplan/agentPrompt.js`: the draft prompt below, plus "reply with the JSON in one code block" and how to use the error paths, then the whole of `plan-format.md`. The plan panel shows it read-only, with a copy button and the privacy text. Only the website version exists, so the text has the website clause: "Open Plan 不會上傳你的圖片或平面圖。此網站版把資料存在這個瀏覽器中。你把圖片交給 AI 助理時，圖片由該助理處理。" The local file mode text comes with C3, and the text beside image import with D1.
+- **Tools:** a new user no longer gets the sample, so the visual capture, `bounds.mjs`, `replace.mjs` and `shadows.mjs` load the sample with 載入範例公寓 and reload with only that plan in storage (`tools/checks/sample-plan.mjs`). Against baseline 2, every pixel below the header is identical; the header differs only in the new 匯入 button. That change was accepted as **baseline 3** (`2026-10-07-chrome-155.0.8059.39-b3`); baseline 2 is kept.
+- **Check:** `tools/checks/import.mjs`.
+
 ### Draft import format (v2)
 
 Units mm; x goes right and y goes down (the image direction). One continuous wall, 8 m long and 200 mm thick, with four openings. The room is below the wall on screen, which is the wall's right side.
@@ -266,6 +279,7 @@ Units mm; x goes right and y goes down (the image direction). One continuous wal
 ```json
 {
   "schemaVersion": 2,
+  "id": "example",
   "units": "mm",
   "name": "My apartment",
   "ceilingHeight": 2800,
@@ -487,8 +501,8 @@ Two image points and one length give only the scale. Alignment needs **pairs of 
 - **Diagonal walls** (v3): format ready, renderer later. **Wall format** (v3): centre lines only.
 - **Repository** (v7): pnpm monorepo; TypeScript for `packages/core` only; Vitest for core logic; a separate browser harness for pixel compares; private root `open-plan-workspace`.
 
-**Depends on a test:**
-- **Large-plan shadows:** keep shadows for now. Decide after the 100 × 100 m test in Step A, from softness, artifacts and performance.
+**Decided after a test:**
+- **Large-plan shadows (2026-10-07):** keep shadows at all plan sizes, from the 100 × 100 m record in Step A (softness, artifacts, edges, frame rate). Check again on real GPU hardware before a release.
 
 **Open:**
 - **Package name.** Check on 2026-10-06: `open-plan` on npm is **taken** (version 1.0.0, a Markdown plan review CLI, not related). `@open-plan/cli` is not published, but that does not show that the `@open-plan` scope is free or that we control it. **Before publishing, choose a scope that we control.** Until then, examples use `<package>` and `<cli>`.

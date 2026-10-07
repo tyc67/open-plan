@@ -1,7 +1,7 @@
-import { migrateGeometry } from './geometryMigration.js';
-import { migrateV1, validatePlan } from 'open-plan-core';
+import { validatePlan } from 'open-plan-core';
 import { validateDocumentV1 } from './document.js';
 import { issueMessage } from './issueMessages.js';
+import { migrateV1Document } from './planFile.js';
 import { localizeDocument } from './locale.js';
 const KEY = 'open-plan:document:v1';
 const RECOVERY_KEY = 'open-plan:document:v1:recovery';
@@ -35,9 +35,9 @@ export function loadDocument() {
     if (!v1.ok) throw new PlanLoadError(v1.errors);
     // Keep the v1 data first; if it cannot be kept, do not migrate, so the next save cannot replace the only copy.
     localStorage.setItem(BEFORE_V2_KEY, raw);
-    let plan;
-    try { plan = migrateV1(migrateGeometry(localizeDocument(doc))).plan; }
-    catch (error) { throw new PlanLoadError([{ path: error.path || '$', code: 'v1-unreadable', params: { reason: error.code || error.message } }]); }
+    const migrated = migrateV1Document(doc);
+    if (!migrated.ok) throw new PlanLoadError(migrated.errors);
+    const plan = migrated.plan;
     // A v1 plan can pass the v1 check and still give a v2 plan that v2 rejects (for example a wall thicker than 1000 mm).
     // Reject it now, so autosave never writes a plan that the next load cannot read.
     const { plan: checked, warnings } = checkSaved(plan);

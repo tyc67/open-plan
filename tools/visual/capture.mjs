@@ -5,6 +5,7 @@ import { chromium } from 'playwright-core';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { VIEWPORTS, SCENES, shotName } from './scenes.mjs';
+import { openSample } from '../checks/sample-plan.mjs';
 
 const [url, outDir] = process.argv.slice(2);
 if (!url || !outDir) { console.error('Usage: node tools/visual/capture.mjs <url> <out-dir>'); process.exit(2); }
@@ -23,7 +24,7 @@ try {
     const errors = [];
     page.on('pageerror', e => errors.push(e.message));
     await page.goto(url);
-    await page.waitForSelector('svg.plan-svg');
+    await openSample(page);
     if (view === '3d') {
       await page.getByRole('button', { name: '3D 檢視' }).first().click();
       await page.waitForSelector('[aria-label="3D floor-plan view"] canvas', { timeout: 30000 });

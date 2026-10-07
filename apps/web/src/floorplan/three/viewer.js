@@ -56,10 +56,11 @@ export function createViewer(host, callbacks) {
   let architecture = null, archSignature = '', selectedId = null, selectedRoomId = null, selectedWallId = null, roomPolygons = [], selection = null;
   let currentDoc=null,lastOptions=null,snapEnabled=true,furnitureLocked=false,currentUnit='mm',snapGuide=null;
   // The 3D frame (origin, camera, ground and shadow box) comes from the plan's physical bounds. It is set when a plan
-  // is first shown or replaced (a new plan id) and on 重設視角, never during a gesture, so edits do not move the scene.
-  let viewFrame=null,frameDocId=null;
-  function applyFrame(doc) {
-    viewFrame=createViewFrame(doc); frameDocId=doc.id; setFrame(viewFrame);
+  // is first shown or replaced and on 重設視角, never during a gesture, so edits do not move the scene.
+  // The frame is set again when the plan key changes: a different plan, or the same plan loaded again (roadmap B3).
+  let viewFrame=null,frameKey=null;
+  function applyFrame(doc,key=frameKey) {
+    viewFrame=createViewFrame(doc); frameKey=key; setFrame(viewFrame);
     renderer.domElement.dataset.frameOrigin=viewFrame.origin.join(',');   // read by tools/checks/bounds.mjs
     const size=groundSize(viewFrame); ground.scale.set(size/100,size/100,1);
     const shadow=shadowBox(viewFrame); sun.position.set(...shadow.sunPosition);
@@ -102,8 +103,8 @@ export function createViewer(host, callbacks) {
   function select(id,roomId,wallId) { selectedId=id; selectedRoomId=roomId;selectedWallId=wallId; updateSelection(); }
   function sync(doc, options) {
     // A different plan (replacement, restore, undo across one) ends a 3D drag: the same item ID can exist in both plans.
-    if(drag&&(doc.id!==frameDocId||options.furnitureLocked||!options.furniture||!doc.furniture.some(f=>f.id===drag.id)))cancelDrag();
-    if(!drag&&(!viewFrame||doc.id!==frameDocId)) applyFrame(doc);
+    if(drag&&(options.frameKey!==frameKey||options.furnitureLocked||!options.furniture||!doc.furniture.some(f=>f.id===drag.id)))cancelDrag();
+    if(!drag&&(!viewFrame||options.frameKey!==frameKey)) applyFrame(doc,options.frameKey);
     roomPolygons=doc.rooms;currentDoc=doc;lastOptions=options;snapEnabled=options.wallSnap;furnitureLocked=options.furnitureLocked;currentUnit=options.unit||'mm';
     const signature = JSON.stringify([doc.rooms,doc.walls,doc.openings,doc.ceilingHeight,options.cut,options.bearing]);
     if(signature !== archSignature) {
