@@ -1,8 +1,7 @@
 import { memo } from 'react';
 import { formatLength } from './units.js';
 
-// Apartment dimension chains from the reference, in millimetres.
-import { REFERENCE_DIMENSIONS } from './dimensions.js';
+// One dimension chain of the plan, in millimetres.
 const stroke={stroke:'#7d7160',strokeWidth:1,vectorEffect:'non-scaling-stroke'};
 function Chain({horizontal,at,start,segments,unit}) {
   const points=[start];
@@ -19,7 +18,8 @@ function Chain({horizontal,at,start,segments,unit}) {
     {segments.map((value,i)=>{const mid=(points[i]+points[i+1])/2,x=horizontal?mid:at-70,y=horizontal?at-70:mid;return <text key={i} x={x} y={y} fontSize={value<400?140:200} textAnchor="middle" fill="#7d7160" transform={horizontal?undefined:`rotate(-90 ${x} ${y})`}>{formatLength(value,unit)}</text>;})}
   </g>;
 }
-const DimensionLines=memo(function DimensionLines({chains=REFERENCE_DIMENSIONS,unit='mm'}) {
+// Dimension chains are optional plan data (roadmap A3): a plan without them shows none. The sample has its own.
+const DimensionLines=memo(function DimensionLines({chains=[],unit='mm'}) {
   return <g className="dimension-lines" pointerEvents="none" aria-label={`平面圖尺寸（${unit==='cm'?'公分':'毫米'}）`}>{chains.map((chain,i)=><Chain key={i} {...chain} unit={unit}/>)}</g>;
 });
 export default DimensionLines;

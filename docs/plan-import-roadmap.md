@@ -170,7 +170,7 @@ All heights are in mm and are stored in the plan, not in code.
 - **Translation:** floor patterns are anchored at each room's top-left corner, and the random details of a furniture model come from its ID. So a moved plan looks the same.
 - **Large plans:** the shadow map has a fixed size, so shadows get softer on large plans. Accept this up to 100 × 100 m, and record the result. If it looks unacceptable, switch shadows off above a set size.
 - Move `wx`, `wz` and `planPoint` from constants to the viewer state.
-- Make dimension chains optional. A plan without them shows no dimension lines. Automatic chains are later work.
+- Make dimension chains optional. A plan without them shows no dimension lines (checked in `tools/checks/bounds.mjs`). Automatic chains are later work.
 
 ### Step A done when
 
@@ -178,11 +178,17 @@ All heights are in mm and are stored in the plan, not in code.
 - **Sample:** after migration, the sample looks the same as the baseline in 2D and 3D (pixel compare in the browser harness, same camera).
 - **Migration:** a Vitest test converts the sample and converts the internal rects back. Every wall and opening rect is the same as in v1. The hinge formula gives back the v1 `h` for all 6 doors, and the swing matches `o`. Every generated piece has the type from the rule, `demolished: false`, and a report line.
 - **Sample heights:** the 3D pixel compare passes at cut heights 0.9 m and 2.8 m, so wall types on generated pieces change no rendered height or colour. When the bearing-wall layer gets a visible effect (L16), add it to the compare.
-- **Opening holes:** a test plan with one continuous wall and a window, a door, a sliding door and a hole shows four real holes in 3D, with correct sill and lintel heights.
+- **Opening holes:** a test plan with one continuous wall and a window, a door, a sliding door and a hole shows four real holes in 3D, with correct sill and lintel heights. Check: `tools/checks/openings.mjs` (at the full cut height, each point 100 mm inside an opening differs from a solid wall, and each point 100 mm below a sill, above a head or beside an opening is identical to it).
 - **Offset:** a plan moved by (+20000, +20000) mm looks the same as the original, and furniture still snaps flush to a moved wall with a 2D drag and with a 3D canvas drag (the 3D result is exactly the unmoved result + 20000 mm). The 3D frame does not change during or after a drag, and "Reset view" moves it to the new bounds. 3D is pixel-identical. In 2D, every element has the same screen box (to 0.01 px), and at most 0.25% of pixels change: Chrome rounds text and edges at the sub-pixel level from the absolute coordinates, so exact pixel identity is not possible there. Check: `tools/checks/bounds.mjs`.
 - **Size:** a 3 × 4 m room, a 30 × 20 m plan and a 100 × 100 m plan all fit the screen in 2D and 3D, and orbit can show the whole plan. Zoom out always shows a larger area: the minimum 2D scale is half the fit scale when that is below 0.012.
 - **Repeatable captures:** sample furniture has fixed IDs (3D details are seeded from the ID), so two independent captures are identical.
 - **Large-plan shadows:** for the 100 × 100 m plan, record shadow softness, visible artifacts (acne, banding, missing shadows at the edges) and frame rate. Then decide: keep shadows, or switch them off above a set size.
+    - **Result (2026-10-07), headless Chrome 155, SwiftShader (software WebGL), 1440 × 900 at device scale 2, full cut height, PCF soft shadows, 2048 px shadow map.** Record: `tools/visual/shadows.mjs` (images and numbers). A GPU can draw the shadow filter differently, so check again on real hardware before a release.
+    - **Softness:** one shadow texel is 8.6 mm on the sample and 69.3 mm on the 100 × 100 m plan (shadow box 17.5 m and 141.8 m wide). On the large plan, the wall shadows on the floor are wide, soft bands with no sharp edge; on the sample they are clearly sharper. In both, floor shadows are faint, because the hemisphere light is strong.
+    - **Artifacts:** none seen in the default, centre and near-corner views: no acne (stripes on lit faces), no banding, and no gap between a wall and its shadow.
+    - **Edges:** the tested east edge retains its shadow: the shadow that the east perimeter wall casts onto the ground outside the plan has the same strength on the 10 × 10 m and the 100 × 100 m plan (7.8 of 255 brightness against open ground). The other edges were seen in the images but not measured. Interior shadow strength was not measured: from the default camera, most interior wall shadows are hidden behind their walls.
+    - **Frame rate** (1440 × 900, device scale 1): sample 4.5 fps, 100 × 100 m plan 27.6 fps (`tools/checks/bounds.mjs`).
+    - **Decision:** keep shadows at all plan sizes.
 - **Edge cases:** an empty plan and a furniture-only plan open with no error, and "Fit" works.
 - **Demolition:** demolishing a partition wall with a door removes the door hole and the door in 2D and 3D. Restoring the wall brings both back.
 

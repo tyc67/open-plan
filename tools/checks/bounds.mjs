@@ -211,6 +211,15 @@ try {
     await close3d();
   }
 
+  // Dimension chains are optional: a plan with no `dimensions` field shows none (not the sample's chains).
+  const chainCount = () => page.locator('g.dimension-chain').count();
+  const noDimensions = gridPlan('no-dimensions', 6, 4, 0, sample.materials);
+  delete noDimensions.dimensions;
+  await load(noDimensions);
+  check('a plan with no dimensions field shows no dimension lines', (await chainCount()) === 0 && (await page.locator('[role=alert]').count()) === 0, `${await chainCount()} chains`);
+  await load(sample);
+  check('the sample shows its own dimension chains', (await chainCount()) === sample.dimensions.length, `${await chainCount()} of ${sample.dimensions.length}`);
+
   // 3. Fit after zooming returns to the fit area, and editing does not change the fit zoom.
   await load(sample);
   const fitView = await viewBox();
