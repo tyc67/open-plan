@@ -199,6 +199,13 @@ This applies to **Import**, **New empty plan** and **Load sample apartment**.
 - After the replacement, show a status with a **復原上一個平面圖** action. It restores the backup. It stays available until the next replacement.
 - The replacement is also one step in the undo history, for the current session.
 - The existing H2 recovery copy (for unreadable saved data at load) stays separate and is not changed.
+- **Before the backup:** a focused field is committed, and a measurement, pan or furniture/label drag is ended. A drag that is not finished is cancelled, so the backup has the plan from before the drag.
+- **3D drag:** a plan swap (replace, restore, undo, redo, history restore) ends a 3D drag directly, without waiting for a render. It also increases a plan generation number. A 3D drag takes this number when it starts, and the editor drops a move with an old number. The plan ID cannot do this: a second restore of the same backup keeps the plan ID, and the sample has fixed item IDs. The 3D view can release the pointer before it renders the new plan.
+- **Implementation (B1):** backup key `open-plan:document:v1:replaced`. **New empty plan** and **Load sample apartment** are in the plan panel. Restore reads the backup and keeps it, and is one undo step. The replacement clears the selection and fits the new plan. After a load error (autosave paused), replacement does not resume autosave.
+
+### B1 done when
+
+`tools/checks/replace.mjs` passes. It covers: an edit less than 400 ms old is in the backup and comes back with restore; a focused field is committed; 2D and 3D drags in progress are cancelled, and a 3D release that arrives before or after the 3D view renders the new plan moves nothing, also for a restore that keeps the plan ID; a failed backup changes neither the plan nor the undo history and offers a download; restore keeps the backup and works again; the selection is cleared and the new plan fits; the H2 recovery copy is not changed.
 
 ### B2. Validation contract
 

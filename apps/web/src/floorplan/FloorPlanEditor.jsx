@@ -4,8 +4,8 @@ import { createId } from './ids.js';
 import { fitBounds, planGeometry } from 'open-plan-core';
 import { RotateCw, Trash2 } from 'lucide-react';
 import WorkspaceShell from '../workspace/WorkspaceShell.jsx';
-import { createDocument } from './document.js';
-import { loadDocument, preserveUnreadableDocument, saveDocument } from './storage.js';
+import { createDocument, createEmptyDocument } from './document.js';
+import { backupBeforeReplace, loadDocument, preserveUnreadableDocument, replacedDocument, saveDocument } from './storage.js';
 import { LIB } from './seed.js';
 import CostEstimate from './CostEstimate.jsx';
 import SnapGuides from './SnapGuides.jsx';
@@ -136,19 +136,24 @@ export default function FloorPlanEditor() {
     return latestDoc.current;
   }
   function patch(values) { if(values.name&&layers.locked.furnitureLabels)return;if(item&&!layers.locked.furniture) commit({...doc,furniture:doc.furniture.map(f => f.id===item.id?{...f,...values}:f)}); }
-  function moveFurniture(id,position) {
-    if(layers.locked.furniture)return;
+  // A 3D drag gets the plan generation when it starts. If the open plan was swapped during the drag (replace, restore,
+  // undo, redo), the move is dropped: the 3D view can release the pointer before it renders the new plan, and the plan
+  // can have the same ID (a second restore) and the same item IDs (the sample).
+  const planGeneration=useRef(0),view3d=useRef(null);
+  function swapPlanGeneration(){planGeneration.current++;view3d.current?.cancelDrag();}
+  function moveFurniture(id,position,token) {
+    if(layers.locked.furniture||token!==undefined&&token!==planGeneration.current)return;
     const furniture=doc.furniture.find(f=>f.id===id);
     if(furniture && (furniture.cx!==position.cx || furniture.cy!==position.cy))
       commit({...doc,furniture:doc.furniture.map(f=>f.id===id?{...f,...position}:f)});
   }
   function undo() {
-    cancelMeasure();
+    cancelMeasure();swapPlanGeneration();
     if(!history.past.length)return;
     setDoc(history.past.at(-1)); setHistory({past:history.past.slice(0,-1),future:[doc,...history.future]});
   }
   function redo() {
-    cancelMeasure();
+    cancelMeasure();swapPlanGeneration();
     if(!history.future.length)return;
     setDoc(history.future[0]); setHistory({past:[...history.past,doc],future:history.future.slice(1)});
   }
@@ -275,25 +280,64 @@ export default function FloorPlanEditor() {
     const next={...item,id:createId(),cx:item.cx+200,cy:item.cy+200};
     commit({...doc,furniture:[...doc.furniture,next]});selectFurniture(next.id);
   }
-  function exportPlan() {
-    const url=URL.createObjectURL(new Blob([JSON.stringify(doc,null,2)],{type:'application/json'}));
+  function downloadPlan(plan) {
+    const url=URL.createObjectURL(new Blob([JSON.stringify(plan,null,2)],{type:'application/json'}));
     const a=document.createElement('a'); a.href=url; a.download='open-plan.json'; a.click(); setTimeout(()=>URL.revokeObjectURL(url),1000);
   }
-  return <WorkspaceShell unit={unit} onUnit={setUnit} doc={doc} status={tool==='measure'&&view==='2d'?'點選兩點或拖曳測量 · Shift 鎖定水平／垂直 · Esc 取消':status} view={view} onView={setView} tool={spacePan?'pan':tool} onTool={setTool}
-    selected={selected} selectedRoom={room?.id} selectedWall={wall?.id} selectionRequest={selectionRequest} history={history} onSelect={selectFurniture} onRestore={snapshot=>commit(snapshot)}
+  function exportPlan() {downloadPlan(latestDoc.current);}
+  // Commits a focused field and ends every gesture, then returns the latest plan. A furniture or label drag is
+  // cancelled, so the plan is the one from before the drag: the drag was not committed yet.
+  function settleEditor() {
+    swapPlanGeneration();
+    let current=commitPendingEdit();
+    cancelMeasure();setSnapGuides([]);touchRoom.current=null;
+    for(const gesture of [drag.current,pan.current])if(gesture&&svg.current?.hasPointerCapture(gesture.pointerId))svg.current.releasePointerCapture(gesture.pointerId);
+    if(drag.current){current=drag.current.before;setDoc(current);latestDoc.current=current;}
+    drag.current=null;pan.current=null;
+    return current;
+  }
+  function clearSelection(){setSelected(null);setSelectedRoom(null);setSelectedWall(null);setSelectedMeasurement(null);}
+  // Replaces the open plan (new empty plan, sample, later import). The current plan is backed up first; if that fails,
+  // nothing changes. The replacement is one undo step, and "restore" brings the backup back until the next replacement.
+  function replacePlan(next,message) {
+    const current=settleEditor();
+    try {backupBeforeReplace(current);}
+    catch(error) {
+      setReplaceNotice({tone:'error',text:`無法備份目前的平面圖（${error.message}），所以沒有取代。可先下載目前的平面圖。`,actions:[['下載目前平面圖',()=>downloadPlan(current)]]});
+      return;
+    }
+    clearSelection();commit(next,current);setCanRestore(true);
+    setReplaceNotice({tone:'info',text:message,actions:[['復原上一個平面圖',restorePrevious]]});
+  }
+  function restorePrevious() {
+    const current=settleEditor(),previous=replacedDocument();
+    if(!previous){setCanRestore(false);setReplaceNotice({tone:'error',text:'找不到上一個平面圖的備份，或備份已損壞。',actions:[]});return;}
+    clearSelection();commit(previous,current);
+    setReplaceNotice({tone:'info',text:'已復原上一個平面圖。這一步也可以用「復原」取消。',actions:[['復原上一個平面圖',restorePrevious]]});
+  }
+  const [canRestore,setCanRestore]=useState(()=>!!replacedDocument());
+  const [replaceNotice,setReplaceNotice]=useState(null);
+  const planActions={
+    onNewPlan:()=>replacePlan(createEmptyDocument(),'已建立新的空白平面圖。上一個平面圖已備份。'),
+    onLoadSample:()=>replacePlan(createDocument(),'已載入範例公寓。上一個平面圖已備份。'),
+    onRestorePrevious:restorePrevious,canRestore,
+    notice:replaceNotice,onDismissNotice:()=>setReplaceNotice(null),
+  };
+  return <WorkspaceShell planActions={planActions} unit={unit} onUnit={setUnit} doc={doc} status={tool==='measure'&&view==='2d'?'點選兩點或拖曳測量 · Shift 鎖定水平／垂直 · Esc 取消':status} view={view} onView={setView} tool={spacePan?'pan':tool} onTool={setTool}
+    selected={selected} selectedRoom={room?.id} selectedWall={wall?.id} selectionRequest={selectionRequest} history={history} onSelect={selectFurniture} onRestore={snapshot=>{swapPlanGeneration();commit(snapshot);}}
     onRename={rename} onSave={saveNow} onExport={exportPlan} onUndo={undo} onRedo={redo}
     onRotate={()=>patch({rot:(item.rot+90)%360})} onDuplicate={duplicateSelected} onDelete={removeSelected}
     onZoom={zoom} onFit={fit} ratio={ratio} onRatio={setRatio} scaleBar={scaleBar}
     wallSnap={wallSnap} onToggleWallSnap={()=>setWallSnap(value=>!value)} layers={layers} onToggleLayer={toggleLayer} onToggleLayerLock={toggleLayerLock} onClearMeasurements={clearMeasurements} onDeleteMeasurement={deleteMeasurement} showDimensions={layers.dimensions} onToggleDimensions={()=>toggleLayer('dimensions')}
     library={<div className="library"><p>選擇家具加入圖面，再拖曳至所需位置。</p>{LIB.map(category=><details key={category.cat} open><summary>{category.cat}</summary><div className="catalog">{category.items.map((entry,i)=><button key={i} disabled={layers.locked.furniture} onClick={()=>add(entry)}><span>{entry[1]}</span><small>{formatLength(entry[2],unit)} × {formatLength(entry[3],unit)} {unit}</small></button>)}</div></details>)}</div>}
     costEstimate={<CostEstimate doc={doc} onChange={costEstimate=>commit({...doc,costEstimate})}/>} properties={wall?<WallProperties wall={wall} unit={unit} onToggle={toggleDemolition}/>:room?<RoomProperties nameLocked={layers.locked.roomNames} room={room} doc={doc} unit={unit} onPatch={patchRoom} onSelectFurniture={selectFurniture}/>:<div className="inspector">{item?<><h3>{item.name}</h3><FurnitureAppearance nameLocked={layers.locked.furnitureLabels} key={item.id} item={item} onPatch={patch}/>{[['cx','X'],['cy','Y'],['w','寬度'],['d','深度'],['rot','旋轉角度']].map(([key,label])=><label key={key}>{label}<div><input key={`${item.id}-${key}-${item[key]}-${unit}`} type="number" defaultValue={key==='rot'?item[key]:formatLength(item[key],unit)} min={key==='w'||key==='d'?10/unitFactor(unit):undefined} step={key==='rot'?1:10/unitFactor(unit)} onKeyDown={e=>{if(e.key==='Enter'&&!e.nativeEvent.isComposing)e.currentTarget.blur();}} onBlur={e=>{const shown=key==='rot'?String(item[key]):formatLength(item[key],unit),value=Number(e.target.value)*(key==='rot'?1:unitFactor(unit));if(e.target.value!==''&&Number(e.target.value)!==Number(shown)&&Number.isFinite(value)&&(!['w','d'].includes(key)||value>0)&&value!==item[key])patch({[key]:value});else e.target.value=shown;}}/><span>{key==='rot'?'°':unit}</span></div></label>)}<button onClick={()=>patch({rot:(item.rot+90)%360})}><RotateCw size={16}/>旋轉 90°</button><button onClick={()=>{commit({...doc,furniture:doc.furniture.filter(f=>f.id!==item.id)});setSelected(null);}}><Trash2 size={16}/>刪除家具</button></>:<p>選取家具或空間以查看及編輯屬性。</p>}<div className="note"><strong>編輯提示</strong><p>2D 與 3D 共用同一份平面圖。家具編輯會同步顯示。拖曳家具靠近牆面會吸附，按住 Alt / Option 暫停吸附。滾輪縮放、按住空白鍵拖曳平移；觸控以雙指縮放與平移；Esc 取消選取，Delete 刪除家具，⌘ / Ctrl + Z 復原，Shift + ⌘ / Ctrl + Z 重做。</p></div></div>}>
-      {view==='3d'?<ErrorBoundary fallback={()=><div className="view-loading" role="alert"><div className="space-y-3 text-center"><p>無法載入 3D 檢視。平面圖資料未受影響；網路恢復後，請先儲存再重新整理頁面。</p><button type="button" className="rounded-lg border border-slate-300 px-3 py-1.5" onClick={()=>setView('2d')}>返回 2D</button></div></div>}><Suspense fallback={<div className="view-loading" role="status">載入 3D 檢視…</div>}><FloorPlan3D unit={unit} wallSnap={wallSnap} layers={layers} doc={doc} selected={selected} selectedRoom={room?.id} selectedWall={wall?.id} onSelectWall={selectWall} onSelectRoom={selectRoom} onSelect={selectFurniture} onMove={moveFurniture}/></Suspense></ErrorBoundary>:(
+      {view==='3d'?<ErrorBoundary fallback={()=><div className="view-loading" role="alert"><div className="space-y-3 text-center"><p>無法載入 3D 檢視。平面圖資料未受影響；網路恢復後，請先儲存再重新整理頁面。</p><button type="button" className="rounded-lg border border-slate-300 px-3 py-1.5" onClick={()=>setView('2d')}>返回 2D</button></div></div>}><Suspense fallback={<div className="view-loading" role="status">載入 3D 檢視…</div>}><FloorPlan3D unit={unit} wallSnap={wallSnap} layers={layers} doc={doc} selected={selected} selectedRoom={room?.id} selectedWall={wall?.id} onSelectWall={selectWall} onSelectRoom={selectRoom} onSelect={selectFurniture} onMove={moveFurniture} dragToken={()=>planGeneration.current} controlRef={view3d}/></Suspense></ErrorBoundary>:(
       <svg ref={svg} className={tool==='pan'||spacePan?'plan-svg pan-tool':tool==='measure'?'plan-svg measure-tool':'plan-svg'} viewBox={`${viewport.x} ${viewport.y} ${viewport.width} ${viewport.height}`} aria-label="Apartment floor plan" onPointerDownCapture={startMeasure} onContextMenu={e=>{if(tool==='measure'){e.preventDefault();cancelMeasure();}}} onPointerDown={startPan} onPointerMove={move} onPointerLeave={()=>{if(!measureGesture.current)setMeasurementSnap(null);}} onPointerUp={e=>finishDrag(e)} onPointerCancel={e=>finishDrag(e,true)}>
         <defs><FloorPatterns/><RoomPatterns rooms={doc.rooms}/><pattern id="grid" width="500" height="500" patternUnits="userSpaceOnUse"><path d="M 500 0 L 0 0 0 500" fill="none" stroke="#dddcd5" strokeWidth="12"/></pattern></defs>
         <rect x={gridArea[0]} y={gridArea[1]} width={gridArea[2]-gridArea[0]} height={gridArea[3]-gridArea[1]} fill="url(#grid)"/>
         {doc.rooms.map((r,ri)=><polygon key={r.id} data-room-id={r.id} points={r.poly.map(p=>p.join(',')).join(' ')} fill={roomFloorFill(r,ri,doc.materials[r.mat]?.sw||'#eee')} onPointerDown={e=>{if(e.button===0&&tool==='select'&&!spaceHeld.current){e.stopPropagation();if(e.pointerType==='touch'){touchRoom.current={id:r.id,pointerId:e.pointerId,x:e.clientX,y:e.clientY};svg.current.setPointerCapture(e.pointerId);}else selectRoom(r.id);}}}/>)}
         {room&&<polygon className="selected-room-outline" points={room.poly.map(p=>p.join(',')).join(' ')} fill="#0d9488" fillOpacity=".08" stroke="#0d9488" strokeWidth="2" strokeDasharray="8 5" vectorEffect="non-scaling-stroke" pointerEvents="none"/>}
-        {(layers.furniture?[...doc.furniture]:[]).sort((a,b)=>(a.type==='rug'?0:1)-(b.type==='rug'?0:1)).map(f=><g key={f.id} transform={`translate(${f.cx} ${f.cy}) rotate(${f.rot})`} onPointerDown={e=>startDrag(e,f)} className="furniture">
+        {(layers.furniture?[...doc.furniture]:[]).sort((a,b)=>(a.type==='rug'?0:1)-(b.type==='rug'?0:1)).map(f=><g key={f.id} transform={`translate(${f.cx} ${f.cy}) rotate(${f.rot})`} onPointerDown={e=>startDrag(e,f)} data-furniture-id={f.id} className="furniture">
           <title>{f.name} · {formatLength(f.w,unit)} × {formatLength(f.d,unit)} {unit}</title>
           <rect x={-f.w/2} y={-f.d/2} width={f.w} height={f.d} fill="transparent" stroke="none" pointerEvents="all"/>
           <FurnitureSymbol type={f.type} width={f.w} depth={f.d} color={f.color}/>

@@ -5,9 +5,9 @@ import { createViewer } from './three/viewer.js';
 // Metres. Both are below the lowest effective ceiling (2000 mm), so "full" is always the highest.
 const CUT_HEIGHTS={low:.9,mid:1.5};
 
-export default function FloorPlan3D({unit,wallSnap,layers,doc,selected,selectedRoom,selectedWall,onSelectWall,onSelectRoom,onSelect,onMove}) {
+export default function FloorPlan3D({unit,wallSnap,layers,doc,selected,selectedRoom,selectedWall,onSelectWall,onSelectRoom,onSelect,onMove,dragToken,controlRef}) {
   const host=useRef(null), viewer=useRef(null);
-  const latest=useRef({onSelect,onSelectRoom,onSelectWall,onMove}); latest.current={onSelect,onSelectRoom,onSelectWall,onMove};
+  const latest=useRef({onSelect,onSelectRoom,onSelectWall,onMove}); latest.current={onSelect,onSelectRoom,onSelectWall,onMove,dragToken};
   const [error,setError]=useState('');
   // The cut height is a view setting. "Full" is the plan's ceiling height, so it is stored as a level, not as metres.
   const [cutLevel,setCutLevel]=useState('low');
@@ -18,11 +18,14 @@ export default function FloorPlan3D({unit,wallSnap,layers,doc,selected,selectedR
         onSelect:id=>latest.current.onSelect(id),
         onSelectRoom:id=>latest.current.onSelectRoom(id),
         onSelectWall:id=>latest.current.onSelectWall(id),
-        onMove:(id,position)=>latest.current.onMove(id,position),
+        onMove:(id,position,token)=>latest.current.onMove(id,position,token),
+        dragToken:()=>latest.current.dragToken?.(),
         onError:setError,
       });
     } catch(e) { setError(`3D could not start: ${e.message}. You can continue editing in 2D.`); }
-    return ()=>{viewer.current?.dispose();viewer.current=null;};
+    // The editor ends a 3D drag directly, without waiting for a render, when the open plan is swapped.
+    if(controlRef)controlRef.current={cancelDrag:()=>viewer.current?.cancelDrag()};
+    return ()=>{if(controlRef)controlRef.current=null;viewer.current?.dispose();viewer.current=null;};
   },[]);
   useEffect(()=>{
     try { viewer.current?.sync(doc,{cut,unit,wallSnap,bearing:layers.bearing,furnitureLocked:layers.locked.furniture,furniture:layers.furniture,roomNames:layers.roomNames,areas:layers.areas}); viewer.current?.select(selected,selectedRoom,selectedWall); }

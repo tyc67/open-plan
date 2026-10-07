@@ -8,6 +8,13 @@ import { WALLS, WINS, DOORS, SLIDES, ROOMS, MATS, defaultFurniture } from './see
 export function createDocument() {
   return migrateV1(createDocumentV1()).plan;
 }
+/** A plan with no content. It keeps the sample's floor materials, so rooms added later have materials to use. */
+export function createEmptyDocument() {
+  return {
+    schemaVersion: 2, id: createId(), name: '未命名平面圖', units: 'mm', locale: 'zh-TW', ceilingHeight: 2800,
+    walls: [], openings: [], rooms: [], materials: structuredClone(MATS), furniture: [], measurements: [], dimensions: [],
+  };
+}
 function createDocumentV1() {
   return {
     schemaVersion: 1, id: createId(), name: 'Apartment plan', units: 'mm', locale: 'zh-TW',

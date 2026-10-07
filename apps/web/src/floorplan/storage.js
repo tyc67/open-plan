@@ -6,6 +6,9 @@ const KEY = 'open-plan:document:v1';
 const RECOVERY_KEY = 'open-plan:document:v1:recovery';
 // The last saved plan in schema v1, kept when it is migrated to v2 at load. It is never overwritten by v2 saves.
 const BEFORE_V2_KEY = 'open-plan:document:v1:before-v2';
+// The open plan from just before the last replacement (new plan, sample, later import). "Restore" reads it and keeps it,
+// so it stays available until the next replacement. It is separate from RECOVERY_KEY, which is only for unreadable saves.
+const REPLACED_KEY = 'open-plan:document:v1:replaced';
 export function loadDocument() {
   const raw = localStorage.getItem(KEY);
   if (!raw) return null;
@@ -42,4 +45,13 @@ export function savedDocumentText() {
 export function setAsideSavedDocument() {
   if (!preserveUnreadableDocument()) return false;
   try { localStorage.removeItem(KEY); return true; } catch { return false; }
+}
+// Throws if the backup cannot be written (for example, storage is full): the caller must then not replace the plan.
+export function backupBeforeReplace(doc) { localStorage.setItem(REPLACED_KEY, JSON.stringify(doc)); }
+// The plan from before the last replacement, or null if there is none or it is not a valid plan.
+export function replacedDocument() {
+  try {
+    const doc = JSON.parse(localStorage.getItem(REPLACED_KEY));
+    return doc && validateDocument(doc) ? localizeDocument(doc) : null;
+  } catch { return null; }
 }

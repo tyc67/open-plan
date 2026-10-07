@@ -101,9 +101,10 @@ export function createViewer(host, callbacks) {
   }
   function select(id,roomId,wallId) { selectedId=id; selectedRoomId=roomId;selectedWallId=wallId; updateSelection(); }
   function sync(doc, options) {
+    // A different plan (replacement, restore, undo across one) ends a 3D drag: the same item ID can exist in both plans.
+    if(drag&&(doc.id!==frameDocId||options.furnitureLocked||!options.furniture||!doc.furniture.some(f=>f.id===drag.id)))cancelDrag();
     if(!drag&&(!viewFrame||doc.id!==frameDocId)) applyFrame(doc);
     roomPolygons=doc.rooms;currentDoc=doc;lastOptions=options;snapEnabled=options.wallSnap;furnitureLocked=options.furnitureLocked;currentUnit=options.unit||'mm';
-    if(drag&&(furnitureLocked||!options.furniture||!doc.furniture.some(f=>f.id===drag.id)))cancelDrag();
     const signature = JSON.stringify([doc.rooms,doc.walls,doc.openings,doc.ceilingHeight,options.cut,options.bearing]);
     if(signature !== archSignature) {
       archSignature = signature;
@@ -143,7 +144,7 @@ export function createViewer(host, callbacks) {
     // First click selects. Dragging a selected model moves it rather than orbiting.
     if(!furnitureLocked && id && id===selectedId && point) {
       const model=models.get(id).group;
-      drag={id,pid:e.pointerId,start:model.position.clone(),offset:point.clone().sub(model.position),moved:false};
+      drag={id,token:callbacks.dragToken?.(),pid:e.pointerId,start:model.position.clone(),offset:point.clone().sub(model.position),moved:false};
       controls.enabled=false; renderer.domElement.setPointerCapture(e.pointerId);
     }
   }
@@ -178,7 +179,7 @@ export function createViewer(host, callbacks) {
       renderer.domElement.style.cursor='';
       if(renderer.domElement.hasPointerCapture(e.pointerId)) renderer.domElement.releasePointerCapture(e.pointerId);
       if(model && cancel) model.position.copy(g.start);
-      else if(model && g.moved) callbacks.onMove(g.id,g.position);
+      else if(model && g.moved) callbacks.onMove(g.id,g.position,g.token);
       selection?.update?.();
     } else if(!cancel && Math.hypot(e.clientX-pointerStart.x,e.clientY-pointerStart.y)<4) {const hit=pick(e);if(hit?.kind==='room')callbacks.onSelectRoom(hit.id);else if(hit?.kind==='wall')callbacks.onSelectWall(hit.id);else callbacks.onSelect(hit?.id??null);}
     pointerStart=null;
@@ -213,7 +214,7 @@ export function createViewer(host, callbacks) {
     frame=requestAnimationFrame(render);
   }
   render();
-  return {sync,select,resetCamera,dispose() {
+  return {sync,select,resetCamera,cancelDrag,dispose() {
     clearSnapGuide();disposed=true; cancelAnimationFrame(frame); observer.disconnect(); controls.dispose();
     canvas.removeEventListener('pointerdown',pointerDown,true);
     canvas.removeEventListener('pointermove',pointerMove);
