@@ -87,22 +87,27 @@ export async function replaceFile(path: string, data: string | Buffer): Promise<
   await syncFolder(dirname(path));
 }
 
-// ---- Backups: <plan>.backups/<time>-<revision>.json ----
+// ---- Backups: <plan>.backups/<time>-<revision>[-<label>][-<n>].json ----
 
 export const backupFolder = (plan: string) => `${plan}.backups`;
 export const BACKUPS_KEPT = 20;
-const BACKUP_NAME = /^(\d{8}T\d{9}Z)-([0-9a-f]{64})(?:-(\d+))?\.json$/;
+const BACKUP_NAME = /^(\d{8}T\d{9}Z)-([0-9a-f]{64})(?:-(browser|replaced))?(?:-(\d+))?\.json$/;
 
-export interface BackupInfo { name: string; time: string; revision: string; bytes: number }
+/**
+ * What a backup holds. `file`: earlier bytes of the plan file. `browser`: a browser plan kept before 載入檔案版本 replaced
+ * it; `replaced`: a browser plan from before a replacement (import, new plan, sample) in `serve` (roadmap C3).
+ */
+export type BackupLabel = 'file' | 'browser' | 'replaced';
+export interface BackupInfo { name: string; time: string; revision: string; label: BackupLabel; bytes: number }
 
 const stamp = (date: Date) => date.toISOString().replace(/[-:.]/g, '');
 
 /**
- * Writes the current bytes of a plan to its backup folder and syncs them, before the plan is replaced. If this fails,
- * the caller must not replace the plan. Returns the backup name.
+ * Writes bytes to the backup folder of a plan and syncs them: by default the current file bytes, before the plan is
+ * replaced; with a label, a browser plan. If this fails, the caller must not go on. Returns the backup name.
  */
-export async function writeBackup(plan: string, bytes: Buffer): Promise<string> {
-  const folder = backupFolder(plan), base = `${stamp(new Date())}-${revisionOf(bytes)}`;
+export async function writeBackup(plan: string, bytes: Buffer, label: BackupLabel = 'file'): Promise<string> {
+  const folder = backupFolder(plan), base = `${stamp(new Date())}-${revisionOf(bytes)}${label === 'file' ? '' : `-${label}`}`;
   try { await mkdir(folder, { recursive: true }); } catch (error) { throw new CliError('BACKUP_FAILED', `Cannot make the backup folder ${folder} (${(error as NodeJS.ErrnoException).code}). Nothing was changed.`, { folder }); }
   for (let n = 1; n < 100; n++) {
     const name = n === 1 ? `${base}.json` : `${base}-${n}.json`;
@@ -128,7 +133,7 @@ export async function listBackups(plan: string): Promise<BackupInfo[]> {
     const match = BACKUP_NAME.exec(name);
     if (!match) continue;
     const { size } = await stat(join(backupFolder(plan), name));
-    out.push({ name, time: match[1], revision: match[2], bytes: size });
+    out.push({ name, time: match[1], revision: match[2], label: (match[3] ?? 'file') as BackupLabel, bytes: size });
   }
   return out;
 }

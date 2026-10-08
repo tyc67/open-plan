@@ -25,7 +25,8 @@ try {
 
   const installed = join(app, 'node_modules/open-plan-cli');
   const manifest = JSON.parse(readFileSync(join(installed, 'package.json'), 'utf8'));
-  check('the package has only package.json and dist/cli.js', JSON.stringify(readdirSync(installed).sort()) === '["dist","package.json"]' && JSON.stringify(readdirSync(join(installed, 'dist'))) === '["cli.js"]');
+  check('the package has only package.json, dist/cli.js and the editor for serve (dist/editor)', JSON.stringify(readdirSync(installed).sort()) === '["dist","package.json"]' &&
+    JSON.stringify(readdirSync(join(installed, 'dist')).sort()) === '["cli.js","editor"]' && readdirSync(join(installed, 'dist/editor')).includes('index.html'));
   check('the only runtime dependency is resvg', JSON.stringify(Object.keys(manifest.dependencies ?? {})) === '["@resvg/resvg-js"]', JSON.stringify(manifest.dependencies));
   check('open-plan-core is not installed', !readdirSync(join(app, 'node_modules')).includes('open-plan-core'));
   check('the bundle has no repository path', !readFileSync(join(installed, 'dist/cli.js'), 'utf8').includes(repo));

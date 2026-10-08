@@ -103,7 +103,7 @@ export async function render(file: string, out: string, options: RenderOptions =
 }
 
 /** Resolves the plan path, takes its lock, and checks under the lock that the path still names the same single-link file. */
-async function lockedPlan<T extends { notices: string[] }>(file: string, mustExist: boolean, work: (plan: string, exists: boolean) => Promise<T>, lock?: LockOptions): Promise<T> {
+export async function lockedPlan<T extends { notices: string[] }>(file: string, mustExist: boolean, work: (plan: string, exists: boolean) => Promise<T>, lock?: LockOptions): Promise<T> {
   const plan = await canonicalPath(file, mustExist);
   return withLock(plan, async () => {
     if ((await canonicalPath(file, mustExist)) !== plan) throw new CliError('PLAN_PATH_CHANGED', `${file} now resolves to another file. Nothing was changed; run the command again.`, { file });

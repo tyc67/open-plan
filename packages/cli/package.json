@@ -11,7 +11,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "pnpm --filter open-plan-core build && node scripts/build.mjs",
+    "build": "pnpm --filter open-plan-core build && pnpm --filter open-plan-web build && node scripts/build.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test:pack": "node scripts/pack-test.mjs"
   },

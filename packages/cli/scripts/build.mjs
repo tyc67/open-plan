@@ -3,7 +3,7 @@
 // dependency, because it has a native part for each platform. Core comes in through its public package exports (its
 // compiled dist), the same interface as for any other user, so build core first.
 import { build } from 'esbuild';
-import { access, readFile, rm } from 'node:fs/promises';
+import { access, cp, readFile, rm } from 'node:fs/promises';
 import { dirname, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -29,3 +29,9 @@ await build({
   bundle: true, platform: 'node', format: 'esm', target: 'node22', external: ['@resvg/resvg-js'],
   plugins: [raw], logLevel: 'warning',
 });
+// The editor for `serve` (roadmap C3): the web app's build output, served from dist/editor.
+const editor = resolve(root, '../../apps/web/dist');
+try { await access(resolve(editor, 'index.html')); } catch {
+  console.error('apps/web is not built. Run `pnpm --filter open-plan-web build` first.'); process.exit(1);
+}
+await cp(editor, resolve(root, 'dist/editor'), { recursive: true });
