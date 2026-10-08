@@ -5,6 +5,8 @@ import { RotateCw, Trash2 } from 'lucide-react';
 import WorkspaceShell from '../workspace/WorkspaceShell.jsx';
 import { backupBeforeReplace, loadDocument, preserveUnreadableDocument, replacedDocument, saveDocument } from './storage.js';
 import { readImportFile } from './planFile.js';
+import { createFileSync } from './fileSession.js';
+import { issueMessage } from './issueMessages.js';
 import { AGENT_PROMPT } from './agentPrompt.js';
 import { LIB } from './furnitureLibrary.js';
 import CostEstimate from './CostEstimate.jsx';
@@ -28,7 +30,13 @@ const NO_FURNITURE_LABEL =new Set(['plant','floorlamp','sidetable','barstool','b
 
 // A saved plan with tolerable issues opens with a notice; the issues are listed in the plan panel.
 const warningNotice=(count,prefix)=>({tone:'warning',text:`${prefix}這個平面圖有 ${count} 個需要注意的地方，可以照常編輯；清單在「平面圖設定」。`,actions:[]});
-function initialState() {
+function initialState(fileSession) {
+  // File mode (roadmap C3): the plan comes from the file. A file that cannot be read yet opens an empty plan, and writes
+  // wait until the file is valid again.
+  if (fileSession) {
+    const { state } = fileSession;
+    return { doc: state.valid ? state.plan : createEmptyPlan(), error: '', loadErrors: [], notice: state.valid && state.warnings.length ? warningNotice(state.warnings.length, '') : null };
+  }
   try {
     const loaded = loadDocument();
     // A new user starts with an empty plan; the canvas then offers Import and Load sample apartment (roadmap B3).
@@ -41,8 +49,8 @@ function initialState() {
       error: `無法載入已儲存的平面圖：${error.message}。${kept ? '原始資料已另存備份；' : '原始資料未能備份；'}自動儲存已暫停，按「儲存到此裝置」會覆寫並恢復自動儲存。` };
   }
 }
-export default function FloorPlanEditor() {
-  const [initial] = useState(initialState);
+export default function FloorPlanEditor({ fileSession = null }) {
+  const [initial] = useState(() => initialState(fileSession));
   const [doc,setDoc] = useState(initial.doc);
   const latestDoc=useRef(doc);latestDoc.current=doc;
   const [selected,setSelected] = useState(null);
@@ -131,11 +139,39 @@ export default function FloorPlanEditor() {
   useEffect(() => {
     if (!autosave.current) return;
     const timer = setTimeout(() => {
+      // File mode writes through the file session, which writes only when the plan differs from the file.
+      if (fileSync.current) { fileSync.current.save(); return; }
       try { saveDocument(doc); setStatus('已儲存到此裝置'); }
       catch (error) { setStatus(`Save failed: ${error.message}`); }
     },400);
     return () => clearTimeout(timer);
   },[doc]);
+  // ---- File mode (roadmap C3b) ----
+  const fileSync=useRef(null);
+  const [fileView,setFileView]=useState(()=>fileSession&&!fileSession.state.valid?{status:'invalid',state:fileSession.state}:{status:'ok'});
+  const editorForFile=useRef(null);
+  editorForFile.current={
+    latest:()=>latestDoc.current,
+    // A gesture, a 3D drag or a focused field: an external version would interrupt it, so it is a conflict instead.
+    busy:()=>!!(drag.current||pan.current||measureGesture.current||view3d.current?.isDragging?.()||(document.activeElement instanceof HTMLElement&&document.activeElement.matches('input,textarea,select'))),
+    settle:()=>settleEditor(),
+    // A file version replaces the open plan without an undo step, and the undo history starts again.
+    load:plan=>{swapPlanGeneration();cancelMeasure();setSnapGuides([]);setDoc(plan);latestDoc.current=plan;setHistory({past:[],future:[]});},
+  };
+  useEffect(()=>{
+    if(!fileSession)return;
+    const sync=createFileSync(fileSession,{latest:()=>editorForFile.current.latest(),busy:()=>editorForFile.current.busy(),settle:()=>editorForFile.current.settle(),load:plan=>editorForFile.current.load(plan)},next=>{
+      setFileView(next);
+      if(next.status==='ok'&&next.loaded)setStatus(next.backup?'已載入檔案版本；你的版本已備份到檔案旁的備份資料夾':'已載入檔案的新版本');
+      else if(next.status==='ok'&&next.saved)setStatus(next.kept?'已保留你的版本；檔案原本的版本已備份':'已儲存到檔案');
+      else if(next.status==='saving')setStatus('正在儲存到檔案…');
+    });
+    fileSync.current=sync;
+    // Unsaved edits that are not in the file yet: the browser asks before the page is closed.
+    const beforeUnload=e=>{if(sync.unsaved()){e.preventDefault();e.returnValue='';}};
+    window.addEventListener('beforeunload',beforeUnload);
+    return ()=>{window.removeEventListener('beforeunload',beforeUnload);sync.stop();fileSync.current=null;};
+  },[]);
   function commit(next,before=doc) {
     setHistory(h => ({past:[...h.past.slice(-49),before],future:[]}));
     setDoc(next);latestDoc.current=next;
@@ -282,6 +318,7 @@ export default function FloorPlanEditor() {
   });
   useEffect(()=>{spaceHeld.current=false;setSpacePan(false);},[view]);
   function saveNow() {
+    if(fileSync.current){fileSync.current.save();return;}
     try {saveDocument(doc);setStatus(autosave.current?'已儲存到此裝置':'已儲存到此裝置，自動儲存已恢復');autosave.current=true;}catch(error){setStatus(`儲存失敗：${error.message}`);}
   }
   function rename(name) {if(name!==doc.name)commit({...doc,name});}
@@ -310,24 +347,28 @@ export default function FloorPlanEditor() {
   function clearSelection(){setSelected(null);setSelectedRoom(null);setSelectedWall(null);setSelectedMeasurement(null);}
   // Replaces the open plan (new empty plan, sample, later import). The current plan is backed up first; if that fails,
   // nothing changes. The replacement is one undo step, and "restore" brings the backup back until the next replacement.
-  function replacePlan(next,message) {
+  async function replacePlan(next,message) {
     const current=settleEditor();
-    try {backupBeforeReplace(current);}
+    // File mode keeps the browser plan on the server (`-replaced`); website mode keeps it in this browser.
+    try {if(fileSync.current)await fileSync.current.backupBeforeReplace(current);else backupBeforeReplace(current);}
     catch(error) {
       setReplaceNotice({tone:'error',text:`無法備份目前的平面圖（${error.message}），所以沒有取代。可先下載目前的平面圖。`,actions:[['下載目前平面圖',()=>downloadPlan(current)]]});
       return;
     }
+    // The backup holds the plan from before the wait; a later edit would be replaced without a backup.
+    if(latestDoc.current!==current){setReplaceNotice({tone:'error',text:'等待備份時又有新的修改，所以沒有取代。請再試一次。',actions:[]});return;}
     clearSelection();commit(next,current);setCanRestore(true);setPlanLoads(n=>n+1);
     setReplaceNotice({tone:'info',text:message,actions:[['復原上一個平面圖',restorePrevious]]});
   }
-  function restorePrevious() {
-    const current=settleEditor(),previous=replacedDocument();
+  async function restorePrevious() {
+    const current=settleEditor(),previous=fileSync.current?await fileSync.current.replacedPlan():replacedDocument();
+    if(latestDoc.current!==current){setReplaceNotice({tone:'error',text:'讀取備份時又有新的修改，所以沒有復原。請再試一次。',actions:[]});return;}
     if(!previous){setCanRestore(false);setReplaceNotice({tone:'error',text:'找不到上一個平面圖的備份，或備份已損壞。',actions:[]});return;}
     clearSelection();commit(previous.plan,current);setPlanLoads(n=>n+1);
     const count=previous.warnings.length;
     setReplaceNotice({tone:count?'warning':'info',text:`已復原上一個平面圖。這一步也可以用「復原」取消。${count?`這個平面圖有 ${count} 個需要注意的地方，清單在「平面圖設定」。`:''}`,actions:[['復原上一個平面圖',restorePrevious]]});
   }
-  const [canRestore,setCanRestore]=useState(()=>!!replacedDocument());
+  const [canRestore,setCanRestore]=useState(()=>fileSession?fileSession.hasReplaced:!!replacedDocument());
   const [replaceNotice,setReplaceNotice]=useState(initial.notice);
   // Tolerable issues of the open plan, checked again after each change, so the list is never out of date.
   const planWarnings=useMemo(()=>validatePlan(doc,'saved').warnings,[doc]);
@@ -352,14 +393,24 @@ export default function FloorPlanEditor() {
     const pending=importState;closeImport();
     if(pending?.result.ok)replacePlan(pending.result.plan,`已匯入「${pending.fileName}」。上一個平面圖已備份。`);
   }
+  // The file-mode state that needs the user: a conflict, an unreadable file, a lost connection or a failed write. It
+  // cannot be dismissed, and it takes the place of the replacement notice while it lasts.
+  const download=()=>downloadPlan(latestDoc.current);
+  const fileNotice=!fileSession?null
+    :fileView.status==='conflict'?{tone:'warning',kind:'conflict',text:`檔案已在外部變更。${fileView.refreshed?'檔案又變更了一次，以下動作會用最新的版本。':''}${fileView.failed?`剛才的動作沒有完成（${fileView.failed}）。`:''}「載入檔案版本」會先把你的版本備份到檔案旁的備份資料夾；「保留我的版本」會先備份檔案的版本。`,actions:[['載入檔案版本',()=>fileSync.current?.loadFile()],['保留我的版本',()=>fileSync.current?.keepMine()]]}
+    :fileView.status==='invalid'?{tone:'error',kind:'invalid',text:`檔案目前無法讀取（${issueMessage(fileView.state.errors[0])}${fileView.state.errors.length>1?`，共 ${fileView.state.errors.length} 個問題`:''}）。瀏覽器保留最後一個有效的平面圖，暫停寫入檔案；檔案修正後會再讀取。`,actions:[['下載目前平面圖',download]]}
+    :fileView.status==='disconnected'?{tone:'error',kind:'disconnected',text:'與本機檔案的連線中斷。瀏覽器保留目前的平面圖，暫停寫入檔案，正在重新連線。',actions:[['下載目前平面圖',download]]}
+    :fileView.status==='error'?{tone:'error',kind:'error',text:`無法寫入檔案（${fileView.message??fileView.code}）。瀏覽器保留目前的平面圖。`,actions:[['重試',()=>fileSync.current?.retry()],['下載目前平面圖',download]]}
+    :null;
   const planActions={
     onImportFile:importFile,importState,onConfirmImport:confirmImport,onCancelImport:closeImport,
     agentPrompt:AGENT_PROMPT,isEmpty:!doc.walls.length&&!doc.rooms.length&&!doc.furniture.length,
     onNewPlan:()=>replacePlan(createEmptyPlan(),'已建立新的空白平面圖。上一個平面圖已備份。'),
     onLoadSample:()=>replacePlan(createSamplePlan(),'已載入範例公寓。上一個平面圖已備份。'),
     onRestorePrevious:restorePrevious,canRestore,
-    notice:replaceNotice,onDismissNotice:()=>setReplaceNotice(null),
+    notice:fileNotice??replaceNotice,onDismissNotice:()=>setReplaceNotice(null),
     warnings:planWarnings,loadErrors:initial.loadErrors,
+    storage:fileSession?{kind:'file',label:`本機檔案模式 · ${fileSession.path}`,saveLabel:'儲存到檔案'}:null,
   };
   return <WorkspaceShell planActions={planActions} unit={unit} onUnit={setUnit} doc={doc} status={tool==='measure'&&view==='2d'?'點選兩點或拖曳測量 · Shift 鎖定水平／垂直 · Esc 取消':status} view={view} onView={setView} tool={spacePan?'pan':tool} onTool={setTool}
     selected={selected} selectedRoom={room?.id} selectedWall={wall?.id} selectionRequest={selectionRequest} history={history} onSelect={selectFurniture} onRestore={snapshot=>{swapPlanGeneration();commit(snapshot);}}

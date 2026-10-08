@@ -210,7 +210,7 @@ export function createViewer(host, callbacks) {
     frame=requestAnimationFrame(render);
   }
   render();
-  return {sync,select,resetCamera,cancelDrag,dispose() {
+  return {sync,select,resetCamera,cancelDrag,isDragging:()=>!!drag,dispose() {
     clearSnapGuide();disposed=true; cancelAnimationFrame(frame); observer.disconnect(); controls.dispose();
     canvas.removeEventListener('pointerdown',pointerDown,true);
     canvas.removeEventListener('pointermove',pointerMove);

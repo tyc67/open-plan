@@ -2,6 +2,7 @@ import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { watch, type FSWatcher } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import { homedir } from 'node:os';
 import { basename, dirname, extname, join, relative, sep } from 'node:path';
 import { canonicalPath, checkSingleLink, CliError, listBackups, readBytes } from './files.js';
 import { backupBrowserPlan, loadFileVersion, readBackup, stateOf, writeBrowserPlan, type FileState } from './file-mode.js';
@@ -78,6 +79,8 @@ export async function startServer(options: ServeOptions): Promise<RunningServer>
   const plan = await checkStart(file);
   const files = await editorFiles(options.editorDir);
   const token = randomBytes(32).toString('hex'), tokenBytes = Buffer.from(token);
+  // The path the editor shows in its mode indicator, with the home folder as ~.
+  const home = homedir(), shownPath = plan.startsWith(`${home}${sep}`) ? `~${plan.slice(home.length)}` : plan;
 
   // ---- State shared by all requests ----
   const clients = new Set<ServerResponse>(), sessionsBackedUp = new Set<string>(), inFlight = new Set<Promise<unknown>>();
@@ -153,7 +156,7 @@ export async function startServer(options: ServeOptions): Promise<RunningServer>
     // Every operation uses the plan path fixed at start. If the name given at start now resolves to another file (a
     // symlink pointed elsewhere), every request is refused, so nothing reads one plan and writes another.
     if ((await canonicalPath(file, false).catch(() => null)) !== plan) return refuse(res, 'PLAN_PATH_CHANGED', `${file} now resolves to another file. Stop serve and start it again.`);
-    if (path === '/api/plan' && method === 'GET') return json(res, 200, { ok: true, state: await currentState() });
+    if (path === '/api/plan' && method === 'GET') return json(res, 200, { ok: true, state: await currentState(), path: shownPath });
     if (path === '/api/plan' && method === 'PUT') {
       const b = await body(req), sessionId = field(b.sessionId, ID, 'sessionId'), requestId = field(b.requestId, ID, 'requestId');
       // keep-mine (保留我的版本) writes over a file version that the browser has not loaded, so it always backs it up.

@@ -24,7 +24,7 @@ export default function FloorPlan3D({unit,wallSnap,layers,doc,selected,selectedR
       });
     } catch(e) { setError(`3D could not start: ${e.message}. You can continue editing in 2D.`); }
     // The editor ends a 3D drag directly, without waiting for a render, when the open plan is swapped.
-    if(controlRef)controlRef.current={cancelDrag:()=>viewer.current?.cancelDrag()};
+    if(controlRef)controlRef.current={cancelDrag:()=>viewer.current?.cancelDrag(),isDragging:()=>!!viewer.current?.isDragging()};
     return ()=>{if(controlRef)controlRef.current=null;viewer.current?.dispose();viewer.current=null;};
   },[]);
   useEffect(()=>{
