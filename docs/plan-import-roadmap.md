@@ -574,19 +574,62 @@ Forms:
 
 | Tool | Read-only | Notes |
 | --- | --- | --- |
+| `get_guide` | yes | The full guide in the MCP form |
 | `get_schema` | yes | Schema and field description |
 | `read_plan` | yes | Plan JSON and revision |
 | `plan_info` | yes | Counts, size, rooms with areas |
-| `validate_plan` | yes | A path or inline JSON; returns errors and warnings |
-| `render_preview` | yes | Returns a PNG image, optional crop and grid |
+| `validate_plan` | yes | A path or inline JSON (exactly one); returns errors and warnings |
+| `render_preview` | yes | Returns a PNG image, optional crop and grid; size limits |
 | `create_plan` | no | Empty or sample; refuses to write over an existing file |
+| `write_plan` | no, destructive | A whole plan; exclusive creation, or replacement with `expectedRevision` |
 | `apply_commands` | no | Needs `expectedRevision`; returns the new revision or `REVISION_CONFLICT` |
-| `migrate_plan` | no | v1 to v2 with report |
+| `migrate_plan` | no, destructive | v1 to v2 with report; replacement with `expectedRevision` |
 
 - Tools work on plan files **inside the agent's working directory only**. Paths outside it are refused.
 - The server sends the agent guide as `instructions` at start, and offers it as a resource and as a prompt (`convert_floor_plan_image`).
 - Tool annotations mark read-only and destructive tools, so agents can ask the user before a write.
 - When `serve` runs for the same file, the browser shows MCP changes live through C3. No extra link is needed.
+
+**Decisions (C5 review, 2026-10-08):**
+
+- **Three parts, each with a review stop:** **C5a** the server, its tools and their automated tests (no real agent); **C5b** the acceptance tests for MCP (100 parallel writers from the CLI and MCP, backups, live update in `serve`); **C5c** real agents (Claude Code and Codex from a real image to a plan shown in `serve`; Gemini CLI, Cursor and OpenCode: connection and `validate_plan`). C5c records the working directory that each client gives to the server.
+- **Library:** the official `@modelcontextprotocol/sdk`, pinned to an exact version. Checked on npm on 2026-10-08: 1.32.1, Node 18 or later, peer dependency `zod` 3.25 or 4. Its package also has HTTP transports (express, hono and others); only the server and the stdio transport are imported, and esbuild bundles them, so the installed package gets no new runtime dependency. C5a checks that the bundle works alone (from the packed install, with no unresolved runtime dependency), that it does not start an HTTP transport, its size, and the license notices.
+- **stdout is only for MCP messages.** Diagnostics go to stderr. The operations return their notices and print nothing.
+- **One code path per operation:** `apply(file, commandsFile)` becomes `applyBatch(file, { expectedRevision, commands })` (the CLI reads the commands file and calls it); `render(file, out)` becomes `renderPng(file, options)`, which returns the PNG (the CLI writes the file). MCP and the CLI use the same lock, validation, revision check and backup code. Tool annotations are only hints: each handler enforces its rules.
+
+**Workspace boundary (C5 only; the CLI still accepts any path):**
+
+- **Root:** the canonical (`realpath`) working directory of the server at start, or `mcp --root <dir>`. Setup examples give an absolute `--root`. A relative tool path is resolved against the root, not against the process directory; an absolute path is accepted only inside the root.
+- **Check:** the canonical path of an existing file, or the canonical parent folder and the name of a new file, must be inside the root. The refusal is `PATH_OUTSIDE_WORKSPACE`. A symlink (file or folder) that resolves outside the root is refused; one that resolves inside is used through its target.
+- **I/O uses the checked path:** after the check, every read and write uses the canonical path, never the name that was given. Writes check containment again **inside** the locked operation, with the path identity check that `lockedPlan` already does. The lock file, the temporary file and the backup folder are next to the canonical plan path, so they are inside the root; the lock and temporary files are created exclusively (an existing name or symlink there is refused), and the backup folder must be a real folder inside the root (a symlinked backup folder is refused).
+- **Tests:** `../` paths, absolute paths, a symlinked file and a symlinked folder pointing out, a migrate destination outside, a hard link, a symlinked backup folder, and a **symlink retargeted between the check and the I/O** (through a test hook in the operation), for a read and for a write.
+- **Remaining limit (to state in the guide and the record):** Node has no API to open a path relative to a held folder handle with no symlink followed at each step. A process that renames or replaces a folder in the path at the same moment as a call can still direct one read or write outside the root. The boundary protects against mistakes and existing links, not against a hostile local process that runs at the same time.
+
+**Tools and their contracts:**
+
+- **Common:** each tool takes `path` (relative to the root) where it works on a file. The result is `structuredContent` plus the same JSON as text (and the image for `render_preview`). A refusal has `isError: true` and `{ ok: false, code, message, errors? }`, with the same codes as the CLI. Bad arguments give `USAGE`.
+- **Shared fields and transport fields:** where a tool has a CLI equivalent, the **shared fields** are equal to the CLI's `--json` result and a test checks them: `ok`, `code`, validation issues (`errors`, `warnings`), `revision`, `previousRevision`, `currentRevision`, command `warnings` and `notes`, `backup`, `migrationReport`. **Transport fields** are documented per tool and are not compared: the CLI's `output` path versus the MCP image content in `render_preview`; no `revision` for an inline plan in `validate_plan`; `write_plan`, `read_plan` and `get_guide` have no CLI equivalent and have their own documented fields.
+- **Input limits (MCP only):** a plan file is at most **5,242,880 bytes** (5 MiB) of file bytes, checked during a bounded read (at most that many bytes plus one are read, whatever the file size says); an inline plan is at most 5,242,880 bytes as UTF-8 JSON; `commands` is at most **1000 commands** and at most **1,048,576 bytes** (1 MiB) as UTF-8 JSON. **Every file read is bounded**, also the read of the current file under the lock (the file can grow between a first read and the lock). Larger input is refused with `INPUT_TOO_LARGE` (with the limit and, when known, the size); inline input is refused before the lock. An oversized file can be found after the lock is taken, but it never causes a backup or a plan write.
+- **`get_guide`** (read-only, new): returns the full guide in the MCP form. Resources and prompts depend on the client, so a tool also gives the guide.
+- **`get_schema`** (read-only): the JSON Schema and the field description.
+- **`read_plan`** (read-only): the file's JSON **as it is in the file** (not normalized), its `schemaVersion`, and the `revision` of **the bytes that were read**, from one read. A file that is not JSON is refused with its parse error and its revision.
+- **`plan_info`** (read-only): the same as the CLI's `info`.
+- **`validate_plan`** (read-only): **exactly one** of `path` or `plan` (inline JSON); both or neither gives `USAGE`. The strict rules of the CLI's `validate`. A file gives its `revision`; an inline plan has no revision.
+- **`render_preview`** (read-only): `path`, optional `crop` (four numbers in mm, can be negative), `width` (1 to 2000 px, default 1200), `grid`, `dimensions`, `text`. The height follows the crop: the image must be at most **2000 px high and 4 million px**, or it is refused with the size it would have. Returns the PNG as image content, with `revision`, `width`, `height` and `warnings`.
+- **`create_plan`** (writes): an empty plan or the sample. It never replaces: an existing file is refused (there is no `replace` in MCP). Creation is exclusive under the lock.
+- **`write_plan`** (writes, marked destructive): writes a whole plan. `plan` is required. **Missing file:** with no `expectedRevision`, creation is exclusive under the lock; with an `expectedRevision` (the caller saw a file that is now gone), it is refused with `REVISION_CONFLICT` and `currentRevision: null`, and nothing is created (two creators at once: one writes, the other is refused with `DESTINATION_EXISTS`, the code that the CLI uses). **Existing file:** `expectedRevision` is required (`REVISION_REQUIRED` without it) and must equal the revision of the current bytes (`REVISION_CONFLICT` with `currentRevision`). A version 1 plan is refused (`NOT_VERSION_2`; use `migrate_plan`). The plan is validated with the strict rules before anything is written; a refusal writes nothing. A replaced file is backed up first, and a failed backup refuses the write. If the normalized plan equals the normalized current plan, the file is not written: its bytes and revision stay. The file is written in the normal format (`planText`).
+- **`apply_commands`** (writes, marked destructive): `path`, `expectedRevision`, `commands`, with the same rules as the CLI's `apply` (atomic batch, backup, unchanged plan not written).
+- **`migrate_plan`** (writes, marked destructive): `source`, `destination` (both inside the root). **Missing destination:** with no `expectedRevision`, exclusive creation; with an `expectedRevision`, `REVISION_CONFLICT` with `currentRevision: null`, and nothing is created (the caller meant to replace a version that it saw). **Existing destination** (also `source` itself, for an in-place migration): `expectedRevision` of the destination is required and must match, in place of the CLI's `--replace`; the destination is backed up first. The result gives the new revision and the migration report.
+- **Annotations:** `readOnlyHint` on the read-only tools; `destructiveHint` on `write_plan`, `apply_commands` and `migrate_plan`; `create_plan` is not destructive (it never replaces). Each write tool description says when a backup is made: a **replacement** backs up the previous file first; a **first creation** has no previous file, so it makes no backup.
+
+**Guide for MCP:**
+
+- **Instructions (short):** the intro, the image-to-plan rules and the tool loop, and how to get the full guide: the `get_guide` tool, the resource `open-plan://guide`, or the prompt `convert_floor_plan_image`. The tool descriptions alone are enough for basic use (fields, the revision rule, what each tool refuses).
+- **Command contracts are separate from the transport.** `commands.md` keeps only the contracts of the commands (fields, effects, refusals, example `commands` lists). The batch envelope moves to the transport fragments: `cli.md` (`commands.json` and `apply`) and a new `mcp.md` (the `apply_commands` arguments, the tool names and the result shapes, with no command files). The forms `text`, `agents-md`, `skill` and `llms` use `cli.md`; the new form `mcp` uses `mcp.md`.
+- **Tests:** the existing guide tests also cover the `mcp` form; the MCP envelope example, each example batch and the refused example run **through the built stdio server** with real revisions, not only through the CLI.
+- **Setup:** one line or config entry per agent, each with the local command and an absolute `--root`, written after the current documentation of each agent is checked. The package is not published, so the examples use the local install until a package name is chosen.
+
+**Tests in C5a:** Vitest, through the SDK client over stdio to the built `dist/cli.js`: every tool; MCP results equal to the CLI `--json` results for the same operation; all the contract cases above (`write_plan`: two creators at once, an external edit before a replacement, a missing and a stale revision, an `expectedRevision` for a missing file, an unchanged plan, a failed backup; `migrate_plan`: a destination deleted between the caller's read and the locked operation; each input limit, with a file larger than the limit read only up to the limit); the workspace cases. The packed install test starts `mcp`, does the handshake, one read (`read_plan`) and one write (`apply_commands`), and checks that stdout has only MCP messages.
 
 ### Step C done when
 
