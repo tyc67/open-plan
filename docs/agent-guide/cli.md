@@ -29,6 +29,28 @@ Add `--json` to any command for one JSON object on standard output. Each result 
 
 **Editing the file directly:** you can write the plan file yourself (for the first version from an image). Then run `validate`. For changes to an existing plan, use `apply`: it checks the revision, so it does not write over a change that the user made in the editor.
 
+### MCP setup
+
+The MCP server is `<cli> mcp --root <folder>`, where `<folder>` is the absolute path of the folder with the plan files. In the lines below, `<command>` is the absolute path of the installed `open-plan` command (for example `/home/me/plans/node_modules/.bin/open-plan`). These server entries were tested with `claude -p` (Claude Code 2.1.285) and `codex exec` (Codex 0.160.0).
+
+**Claude Code:** write this file, for example `open-plan.mcp.json`:
+
+```json
+{"mcpServers":{"open-plan":{"command":"<command>","args":["mcp","--root","<folder>"]}}}
+```
+
+Then start Claude Code with `claude -p "<task>" --mcp-config open-plan.mcp.json --allowedTools "mcp__open-plan"`. Without `--allowedTools`, the tools are not approved. The tools are named `mcp__open-plan__<tool>`.
+
+**Codex:** add these options to `codex exec`:
+
+```sh
+-c 'mcp_servers.open-plan.command="<command>"' -c 'mcp_servers.open-plan.args=["mcp","--root","<folder>"]'
+```
+
+`codex exec` cannot ask for approval, so it refuses the tools that change files (`write_plan`, `apply_commands`, `migrate_plan`) unless you also add `-c 'mcp_servers.open-plan.default_tools_approval_mode="approve"'`. Give this only for a folder that you agree the agent can change.
+
+**When the CLI is a script** (`node <path>/cli.js`): the command is `node`, and the script path is the first argument. For Claude Code, `"command":"node","args":["<path>/cli.js","mcp","--root","<folder>"]`; for Codex, `-c 'mcp_servers.open-plan.command="node"' -c 'mcp_servers.open-plan.args=["<path>/cli.js","mcp","--root","<folder>"]'`.
+
 ### Sending a batch
 
 `<cli> apply plan.json commands.json` sends a batch of commands (see "Commands"). `commands.json` is one object:

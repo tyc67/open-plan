@@ -253,6 +253,9 @@ describe('agent guide: the forms', () => {
     expect(text).toContain(source('docs/agent-guide/image-to-plan.md').trim());
     expect(text).not.toContain('## MCP tools');
   });
+  it('the CLI part has the MCP setup tested in C5c: claude -p with --mcp-config, codex exec with -c, the approval setting of codex exec, and the node form', () => {
+    for (const part of ['### MCP setup', '"args":["mcp","--root","<folder>"]', '--mcp-config open-plan.mcp.json --allowedTools "mcp__open-plan"', '"command":"node","args":["<path>/cli.js","mcp","--root","<folder>"]', "mcp_servers.open-plan.args=[\"mcp\",\"--root\",\"<folder>\"]", 'default_tools_approval_mode="approve"']) expect(text).toContain(part);
+  });
   it('the mcp form has the same image rules, format and commands, with the MCP part in place of the CLI part', () => {
     const mcp = guide('--form', 'mcp').json.text as string;
     for (const part of ['## Work loop', '## From an image to a plan', '## Open Plan format (schemaVersion 2)', '## MCP tools', '## Commands', '#### `scale_plan`', 'given by the tool `get_schema`']) expect(mcp).toContain(part);
