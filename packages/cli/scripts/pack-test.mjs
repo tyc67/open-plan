@@ -38,6 +38,11 @@ try {
     const r = spawnSync(bin, [...args, '--json'], { cwd: app, encoding: 'utf8' });
     return { code: r.status, json: (() => { try { return JSON.parse(r.stdout); } catch { return null; } })(), err: r.stderr };
   };
+  const guide = cli('guide');
+  const localGuide = spawnSync(process.execPath, [join(pkg, 'dist/cli.js'), 'guide', '--json'], { encoding: 'utf8' });
+  check('guide: the installed CLI prints the whole guide, the same as the workspace build, with no repository link', guide.code === 0 &&
+    guide.json.text.includes('#### `scale_plan`') && guide.json.text.includes('## Open Plan format (schemaVersion 2)') &&
+    guide.json.text === JSON.parse(localGuide.stdout).text && !/\]\((?!https?:)/.test(guide.json.text));
   const schema = cli('schema');
   check('schema', schema.code === 0 && schema.json.schema.title === 'Open Plan floor plan, schema version 2' && schema.json.description.startsWith('# Open Plan format'));
   check('new --sample', cli('new', 'plan.json', '--sample').code === 0);

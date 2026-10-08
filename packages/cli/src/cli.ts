@@ -7,11 +7,14 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import type { Issue } from 'open-plan-core';
 import { CliError } from './files.js';
+import { guide } from './guide.js';
 import * as op from './operations.js';
 import { DEFAULT_PORT, startServer } from './serve.js';
 
 const USAGE = `Usage: open-plan <command> [options]
 
+  guide [--form text|agents-md|skill|llms] [--cli <command>]
+                                         Print the agent guide (the format, the commands, the work loop)
   schema                                 Print the JSON Schema and the field description
   validate <plan.json>                   Check a plan (strict); exit code 1 on errors
   info <plan.json>                       Counts, size, rooms with areas, and the revision
@@ -42,7 +45,7 @@ const EXIT: Record<string, number> = {
   JSON_INVALID: 1, FILE_NOT_FOUND: 1, USAGE: 2, REVISION_CONFLICT: 3, LOCK_TIMEOUT: 4, LOCK_STALE: 4, LOCK_UNCERTAIN: 4,
   IO_ERROR: 5, BACKUP_FAILED: 5, PORT_IN_USE: 5, EDITOR_MISSING: 5,
 };
-const ARITY: Record<string, number> = { schema: 0, validate: 1, info: 1, new: 1, migrate: 2, apply: 2, render: 2, serve: 1, backups: 1, restore: 2 };
+const ARITY: Record<string, number> = { guide: 0, schema: 0, validate: 1, info: 1, new: 1, migrate: 2, apply: 2, render: 2, serve: 1, backups: 1, restore: 2 };
 const RENDER_OPTIONS = ['crop', 'width', 'grid', 'dimensions', 'no-text'] as const, SERVE_OPTIONS = ['port', 'host', 'no-open'] as const;
 
 const issueLine = (i: Issue & { commandIndex?: number }) =>
@@ -55,6 +58,8 @@ function printText(command: string, result: Record<string, any>) {
     out.push(`${result.code}: ${result.message}`);
     if (result.currentRevision) out.push(`Current revision: ${result.currentRevision}`);
     for (const e of result.errors ?? []) out.push(issueLine(e));
+  } else if (command === 'guide') {
+    out.push(result.text.trimEnd());
   } else if (command === 'schema') {
     out.push(result.description.trimEnd(), '', '## JSON Schema', '', JSON.stringify(result.schema, null, 2));
   } else if (command === 'backups') {
@@ -83,7 +88,7 @@ async function main(argv: string[]): Promise<number> {
   try {
     parsed = parseArgs({ args: argv, allowPositionals: true, options: { json: { type: 'boolean' }, sample: { type: 'boolean' }, replace: { type: 'boolean' }, help: { type: 'boolean', short: 'h' },
       crop: { type: 'string' }, width: { type: 'string' }, grid: { type: 'boolean' }, dimensions: { type: 'boolean' }, 'no-text': { type: 'boolean' },
-      port: { type: 'string' }, host: { type: 'string' }, 'no-open': { type: 'boolean' } } });
+      port: { type: 'string' }, host: { type: 'string' }, 'no-open': { type: 'boolean' }, form: { type: 'string' }, cli: { type: 'string' } } });
   } catch (error) { process.stderr.write(`${(error as Error).message}\n\n${USAGE}\n`); return 2; }
   const { values, positionals: [command, ...args] } = parsed;
   if (values.help || !command) { process.stdout.write(`${USAGE}\n`); return command || values.help ? 0 : 2; }
@@ -96,12 +101,14 @@ async function main(argv: string[]): Promise<number> {
   if (args.length !== ARITY[command]) return fail('USAGE', `${command} takes ${ARITY[command]} argument(s).\n\n${USAGE}`);
   if ((values.sample && command !== 'new') || (values.replace && !['new', 'migrate'].includes(command)) ||
     (command !== 'render' && RENDER_OPTIONS.some(o => values[o] !== undefined)) ||
-    (command !== 'serve' && SERVE_OPTIONS.some(o => values[o] !== undefined))) return fail('USAGE', `Option not available for ${command}.`);
+    (command !== 'serve' && SERVE_OPTIONS.some(o => values[o] !== undefined)) ||
+    (command !== 'guide' && (values.form !== undefined || values.cli !== undefined))) return fail('USAGE', `Option not available for ${command}.`);
   const number = (text: string) => text.trim() === '' ? NaN : Number(text);
   try {
     if (command === 'serve') return await serve(args[0], values, fail);
     const result: Record<string, any> =
-      command === 'schema' ? await op.schema()
+      command === 'guide' ? guide(values.form, values.cli)
+      : command === 'schema' ? await op.schema()
       : command === 'validate' ? await op.validate(args[0])
       : command === 'info' ? await op.info(args[0])
       : command === 'new' ? await op.create(args[0], { sample: values.sample, replace: values.replace })
