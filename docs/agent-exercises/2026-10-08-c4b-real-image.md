@@ -77,10 +77,12 @@ In the overlay pictures, Claude Code's walls lie on the image walls almost every
 
 ## Findings for the guide and the format
 
+Findings 1, 3 and 4 are resolved by the C4 follow-up (see the roadmap); 2 and 5 stay open.
+
 1. **Sill and head labels:** Codex used the default heights although the image gives them. The guide could say: when the drawing gives a sill or head height, use it.
 2. **Columns:** both agents drew structural columns as thick walls, because the format has no column type. This works in 2D and 3D; a column type is a possible later format change, not needed now.
 3. **Walls, low walls or cabinets:** both agents were unsure whether some hatched lines are walls or cabinet backs. The guide could say: tell structural walls and partitions, low walls (for example balcony parapets, type `low`) and cabinets apart, using the drawing's hatching and height labels; leave out cabinets; and report each boundary that stays uncertain.
-4. **Negative crop values:** `render --crop -360,-523,…` is refused, because the option parser reads a value that starts with `-` as an option; `--crop=-360,-523,…` works. Found while checking this exercise. The guide and the help text should give the `=` form.
+4. **Negative crop values:** `render --crop -360,-523,…` is refused, because the option parser reads a value that starts with `-` as an option; `--crop=-360,-523,…` works. Found while checking this exercise. Resolved: the CLI now joins a negative value to `--crop`, so both forms work.
 5. **Working files:** both agents deleted their scripts. Codex's `apply` batches are known only from its log; this does not affect the plan, but a record of the batches would help a review.
 
 ## Result

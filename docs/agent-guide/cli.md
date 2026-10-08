@@ -10,7 +10,7 @@ Add `--json` to any command for one JSON object on standard output. Each result 
 | `<cli> validate plan.json` | Checks the plan with the strict rules: an issue that the editor only warns about is an error here. Gives the `revision`. |
 | `<cli> info plan.json` | Counts, size, rooms with areas, the `revision`, and warnings. |
 | `<cli> apply plan.json commands.json` | Changes the plan with a batch of commands (see "Commands"). |
-| `<cli> render plan.json out.png` | Draws the plan in 2D as a PNG. Options: `--crop x0,y0,x1,y1` (an area in mm), `--width px` (default 1200), `--grid` (a 1 m grid), `--dimensions`, `--no-text`. |
+| `<cli> render plan.json out.png` | Draws the plan in 2D as a PNG. Options: `--crop x0,y0,x1,y1` (an area in mm; the values can be negative), `--width px` (default 1200), `--grid` (a 1 m grid), `--dimensions`, `--no-text`. |
 | `<cli> migrate old.json plan.json [--replace]` | Converts a schema version 1 file to version 2, with a report. |
 | `<cli> backups plan.json` | Lists the backups of the plan. |
 | `<cli> restore plan.json <backup-name>` | Restores a backup. The current file is backed up first. |

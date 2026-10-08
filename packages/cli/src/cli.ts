@@ -83,10 +83,17 @@ function printText(command: string, result: Record<string, any>) {
   (result.ok ? process.stdout : process.stderr).write(`${out.join('\n')}\n`);
 }
 
+/**
+ * `--crop -360,-500,9000,8000`: parseArgs takes a value that starts with `-` for an option and refuses it, although a
+ * crop often starts left of or above the origin. A crop value is four numbers, so it is joined to its option.
+ */
+const joinNegativeCrop = (argv: string[]) => argv.flatMap((arg, i) =>
+  arg === '--crop' && /^-[\d.]/.test(argv[i + 1] ?? '') ? [`--crop=${argv[i + 1]}`] : argv[i - 1] === '--crop' && /^-[\d.]/.test(arg) ? [] : [arg]);
+
 async function main(argv: string[]): Promise<number> {
   let parsed;
   try {
-    parsed = parseArgs({ args: argv, allowPositionals: true, options: { json: { type: 'boolean' }, sample: { type: 'boolean' }, replace: { type: 'boolean' }, help: { type: 'boolean', short: 'h' },
+    parsed = parseArgs({ args: joinNegativeCrop(argv), allowPositionals: true, options: { json: { type: 'boolean' }, sample: { type: 'boolean' }, replace: { type: 'boolean' }, help: { type: 'boolean', short: 'h' },
       crop: { type: 'string' }, width: { type: 'string' }, grid: { type: 'boolean' }, dimensions: { type: 'boolean' }, 'no-text': { type: 'boolean' },
       port: { type: 'string' }, host: { type: 'string' }, 'no-open': { type: 'boolean' }, form: { type: 'string' }, cli: { type: 'string' } } });
   } catch (error) { process.stderr.write(`${(error as Error).message}\n\n${USAGE}\n`); return 2; }

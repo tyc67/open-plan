@@ -132,6 +132,15 @@ describe('render', () => {
     expect([png.width, png.height]).toEqual([400, 200]);
     expect([read(join(dir, 'plan.json')), readdirSync(dir).sort()]).toEqual([before, ['part.png', 'plan.json']]);
   });
+  it('--crop takes a value that starts with a minus sign, with or without =', () => {
+    const dir = folder();
+    run(dir, 'new', 'plan.json', '--sample');
+    for (const crop of [['--crop', '-500,-500,4000,2000'], ['--crop=-500,-500,4000,2000']]) {
+      expect(run(dir, 'render', 'plan.json', 'neg.png', ...crop, '--width', '450', '--no-text'), crop.join(' ')).toMatchObject({ code: 0, json: { ok: true, width: 450, height: 250 } });
+    }
+    // Only a crop value is joined: another option after --crop is still an option, and the crop is missing.
+    expect(run(dir, 'render', 'plan.json', 'x.png', '--crop', '--no-text').code).toBe(2);
+  });
   it('draws a plan with tolerable issues and lists them; refuses a plan with errors that block rendering, and writes nothing', () => {
     const dir = folder(), plan = loopPlan();
     writeFileSync(join(dir, 'tolerable.json'), JSON.stringify({ ...plan, rooms: [{ ...plan.rooms[0], mat: 'granite' }] }));
