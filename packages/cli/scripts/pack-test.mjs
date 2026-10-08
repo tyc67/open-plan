@@ -27,10 +27,11 @@ try {
 
   const installed = join(app, 'node_modules/open-plan-cli');
   const manifest = JSON.parse(readFileSync(join(installed, 'package.json'), 'utf8'));
-  check('the package has only package.json, dist/cli.js and the editor for serve (dist/editor)', JSON.stringify(readdirSync(installed).sort()) === '["dist","package.json"]' &&
-    JSON.stringify(readdirSync(join(installed, 'dist')).sort()) === '["cli.js","editor"]' && readdirSync(join(installed, 'dist/editor')).includes('index.html'));
+  check('the package has only package.json, dist/cli.js, its license notices and the editor for serve (dist/editor)', JSON.stringify(readdirSync(installed).sort()) === '["dist","package.json"]' &&
+    JSON.stringify(readdirSync(join(installed, 'dist')).sort()) === '["THIRD-PARTY-NOTICES.txt","cli.js","editor"]' && readdirSync(join(installed, 'dist/editor')).includes('index.html'));
+  check('the license notices name the bundled MCP SDK', readFileSync(join(installed, 'dist/THIRD-PARTY-NOTICES.txt'), 'utf8').includes('@modelcontextprotocol/sdk'));
   check('the only runtime dependency is resvg', JSON.stringify(Object.keys(manifest.dependencies ?? {})) === '["@resvg/resvg-js"]', JSON.stringify(manifest.dependencies));
-  check('open-plan-core is not installed', !readdirSync(join(app, 'node_modules')).includes('open-plan-core'));
+  check('open-plan-core and the MCP SDK are not installed (they are in the bundle)', !readdirSync(join(app, 'node_modules')).includes('open-plan-core') && !readdirSync(join(app, 'node_modules')).includes('@modelcontextprotocol'));
   check('the bundle has no repository path', !readFileSync(join(installed, 'dist/cli.js'), 'utf8').includes(repo));
 
   const bin = join(app, 'node_modules/.bin/open-plan');
@@ -78,6 +79,27 @@ try {
     server.kill('SIGTERM');
     check('serve: stops cleanly on SIGTERM', (await ended) === 0);
   }
+  // mcp from the installed package (roadmap C5): the handshake, one read and one write, and stdout with only MCP messages.
+  const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
+  const { StdioClientTransport } = await import('@modelcontextprotocol/sdk/client/stdio.js');
+  const transport = new StdioClientTransport({ command: bin, args: ['mcp', '--root', app], cwd: work, stderr: 'pipe' });
+  const client = new Client({ name: 'pack-test', version: '0' });
+  const raw = [], unreadable = [];
+  try {
+    await client.connect(transport);
+    const onmessage = transport.onmessage;
+    transport.onmessage = message => { raw.push(message); onmessage?.(message); };
+    // A stdout line that is not a JSON-RPC message is reported to onerror by the transport.
+    const onerror = transport.onerror;
+    transport.onerror = error => { unreadable.push(String(error)); onerror?.(error); };
+    const tools = (await client.listTools()).tools.map(t => t.name);
+    check('mcp: the handshake and the ten tools', client.getServerVersion()?.name === 'open-plan' && tools.length === 10 && tools.includes('apply_commands'), tools.join(' '));
+    const readResult = (await client.callTool({ name: 'read_plan', arguments: { path: 'plan.json' } })).structuredContent;
+    check('mcp: read_plan gives the revision of the file bytes', readResult?.ok && readResult.revision === createHash('sha256').update(readFileSync(join(app, 'plan.json'))).digest('hex'));
+    const written = (await client.callTool({ name: 'apply_commands', arguments: { path: 'plan.json', expectedRevision: readResult?.revision, commands: [{ op: 'set_plan_name', name: 'From MCP' }] } })).structuredContent;
+    check('mcp: apply_commands writes the plan, with a backup', written?.ok && JSON.parse(readFileSync(join(app, 'plan.json'), 'utf8')).name === 'From MCP' && typeof written.backup === 'string');
+    check('mcp: every message on stdout is an MCP (JSON-RPC 2.0) message', raw.length >= 3 && raw.every(m => m.jsonrpc === '2.0') && unreadable.length === 0, unreadable.join('; ') || String(raw.length));
+  } finally { await client.close(); }
   console.log(`node ${process.version}, npm ${execFileSync('npm', ['--version'], { encoding: 'utf8' }).trim()}, ${process.platform} ${process.arch}`);
 } finally {
   rmSync(work, { recursive: true, force: true });

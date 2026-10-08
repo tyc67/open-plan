@@ -46,8 +46,23 @@ export async function checkSingleLink(path: string): Promise<boolean> {
   return true;
 }
 
-export async function readBytes(path: string): Promise<Buffer> {
-  try { return await readFile(path); } catch (error) {
+/**
+ * Reads a file. With `maxBytes` (the MCP input limit), at most `maxBytes + 1` bytes are read, whatever the file size
+ * says, and a larger file is refused with `INPUT_TOO_LARGE`: a file can grow after a first read.
+ */
+export async function readBytes(path: string, maxBytes?: number): Promise<Buffer> {
+  try {
+    if (maxBytes === undefined) return await readFile(path);
+    const handle = await open(path, constants.O_RDONLY);
+    try {
+      const buffer = Buffer.alloc(maxBytes + 1);
+      let length = 0, read;
+      do { ({ bytesRead: read } = await handle.read(buffer, length, buffer.length - length, null)); length += read; } while (read > 0 && length < buffer.length);
+      if (length > maxBytes) throw new CliError('INPUT_TOO_LARGE', `${path} is larger than ${maxBytes} bytes, the limit for one plan file.`, { path, limit: maxBytes });
+      return buffer.subarray(0, length);
+    } finally { await handle.close(); }
+  } catch (error) {
+    if (error instanceof CliError) throw error;
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') throw new CliError('FILE_NOT_FOUND', `${path} does not exist.`, { path });
     throw io(error, 'read', path);
   }
@@ -154,6 +169,20 @@ export async function pruneBackups(plan: string): Promise<string | null> {
   } catch (error) {
     return `The plan was written, but old backups could not be removed (${(error as NodeJS.ErrnoException).code ?? (error as Error).message}). Remove old files in ${backupFolder(plan)} by hand.`;
   }
+}
+
+/**
+ * Creates `path` with complete content only if it does not exist: false if it exists (also as a symlink or a file that
+ * another program made after the caller looked). The caller must hold the lock.
+ */
+export async function createFile(path: string, data: string): Promise<boolean> {
+  let exclusive;
+  try { exclusive = await prepareExclusive(path, data); } catch (error) { throw io(error, 'write', path); }
+  try {
+    const made = await exclusive.link();
+    if (made) await syncFolder(dirname(path));
+    return made;
+  } catch (error) { throw io(error, 'write', path); } finally { await exclusive.discard(); }
 }
 
 /**

@@ -1,3 +1,4 @@
+import { expect } from 'vitest';
 import { spawn, spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -27,3 +28,18 @@ export function runAsync(cwd: string, ...args: string[]): Promise<Run> {
   });
 }
 export const read = (path: string) => readFileSync(path, 'utf8');
+
+/** An MCP client connected to the built CLI's `mcp` server for `root` (roadmap C5). Close it after use. */
+export async function mcpClient(root: string, cwd?: string) {
+  const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
+  const { StdioClientTransport } = await import('@modelcontextprotocol/sdk/client/stdio.js');
+  const client = new Client({ name: 'open-plan-test', version: '0' });
+  await client.connect(new StdioClientTransport({ command: process.execPath, args: [CLI, 'mcp', '--root', root], cwd: cwd ?? root, stderr: 'pipe' }));
+  /** Calls a tool and gives its result object, whether it is an error, and the content. */
+  const call = async (name: string, args: Record<string, unknown> = {}) => {
+    const r = await client.callTool({ name, arguments: args }) as { structuredContent: any; isError?: boolean; content: any[] };
+    expect(JSON.parse(r.content.find(c => c.type === 'text').text), `${name}: the text is the same JSON`).toEqual(r.structuredContent);
+    return { result: r.structuredContent, isError: r.isError === true, content: r.content };
+  };
+  return { client, call, close: () => client.close() };
+}

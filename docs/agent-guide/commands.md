@@ -1,31 +1,19 @@
 ## Commands
 
-`<cli> apply plan.json commands.json` changes a plan with a batch of commands. Use it for every change to an existing plan.
+A batch is a list of commands that changes a plan. Use a batch for every change to an existing plan. "Sending a batch" (in the CLI part or the MCP part) shows how to send it, with the revision of the plan that you read.
 
 ### The batch
 
-`commands.json` is one object:
-
-```json
-{
-  "expectedRevision": "<the revision from validate or info>",
-  "commands": [
-    { "op": "set_plan_name", "name": "My apartment" },
-    { "op": "add_furniture", "type": "sofa", "name": "Sofa", "cx": 2000, "cy": 1500, "w": 2000, "d": 900 }
-  ]
-}
-```
-
-- **`expectedRevision`** (required) is the revision of the plan that you read: 64 hex characters, the SHA-256 of the raw file bytes. If the file changed since then, nothing is written: the result is `REVISION_CONFLICT` (exit code 3) with the `currentRevision`.
+- **`expectedRevision`** (required) is sent with the batch: the revision of the plan that you read, 64 hex characters, the SHA-256 of the raw file bytes. If the file changed since then, nothing is written: the result is `REVISION_CONFLICT` with the `currentRevision`.
 - **`commands`** is a list. The commands run in order, and each command sees the result of the commands before it.
-- **The batch is atomic.** If one command is refused, or the result has an error, nothing is written. The result is `COMMANDS_REFUSED` (exit code 1) with `errors`. Each error has `commandIndex` (zero-based), a `path` and a `code`. For a refused command, the path is in the batch, for example `commands[2].offset`; for an error in the result, the path is in the plan, and `commandIndex` is the first command after which the error exists.
-- **Before the commands run**, the plan is checked. A plan with an error that blocks the editor is refused; fix it first (`validate`). A schema version 1 file is refused with `NOT_VERSION_2`; run `migrate` first.
+- **The batch is atomic.** If one command is refused, or the result has an error, nothing is written. The result is `COMMANDS_REFUSED` with `errors`. Each error has `commandIndex` (zero-based), a `path` and a `code`. For a refused command, the path is in the batch, for example `commands[2].offset`; for an error in the result, the path is in the plan, and `commandIndex` is the first command after which the error exists.
+- **Before the commands run**, the plan is checked. A plan with an error that blocks the editor is refused; fix it first (validate the plan). A schema version 1 file is refused with `NOT_VERSION_2`; migrate it first.
 - **On success**, the result has the new `revision`, the `previousRevision`, the `backup` name, `warnings` and `notes`. Use the new revision for the next batch.
-- **Warnings** do not stop the batch. They are issues that the editor accepts, for example a room edge that is no longer on a wall face (`room-edge-off-wall`). A warning that the plan already had has no `commandIndex`. `validate` is stricter than `apply`: after a batch, run `validate`.
+- **Warnings** do not stop the batch. They are issues that the editor accepts, for example a room edge that is no longer on a wall face (`room-edge-off-wall`). A warning that the plan already had has no `commandIndex`. Validation is stricter than a batch: after a batch, validate the plan.
 - **Notes** tell you what changed beyond the command itself. `id-generated` (`{ list, id }`) gives the id of a new item that had no `id`; use that id in later commands. Other notes: `openings-deleted`, `wall-split`, `walls-joined`, `material-created`, `material-replaced`, `furniture-price-removed`, `plan-scaled`.
 - If the commands do not change the plan, the file is not written and the revision stays the same.
 
-**After `REVISION_CONFLICT`:** the plan changed, for example because the user edited it in the editor. Do not send the same batch again without a check. Read the plan again (`info`, or read the file), check that your commands still fit it (the ids exist, the positions are still correct), and then send them with the new revision.
+**After `REVISION_CONFLICT`:** the plan changed, for example because the user edited it in the editor. Do not send the same batch again without a check. Read the plan again, check that your commands still fit it (the ids exist, the positions are still correct), and then send them with the new revision.
 
 ### Rules for every command
 
@@ -410,18 +398,4 @@ Refused: `size-not-positive`, `scale-points-same`, `scale-result-invalid` (the s
 
 ```json
 [{ "op": "scale_plan", "a": [0, 100], "b": [8000, 100], "distance": 8200 }]
-```
-
-### A refused batch
-
-This batch puts a door where the window `win1` is:
-
-```json
-[{ "op": "add_opening", "type": "door", "wallId": "w1", "offset": 600, "width": 900, "hinge": "start", "swing": "left" }]
-```
-
-`<cli> apply plan.json commands.json --json` writes nothing and gives exit code 1:
-
-```json
-{"ok":false,"code":"COMMANDS_REFUSED","message":"The commands were refused; the plan was not changed.","errors":[{"commandIndex":0,"path":"commands[0].offset","code":"openings-overlap","params":{"op":"add_opening","openingId":"door","otherId":"win1"}}],"notices":[]}
 ```

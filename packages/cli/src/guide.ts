@@ -5,12 +5,14 @@ import commands from '../../../docs/agent-guide/commands.md?raw';
 import cliText from '../../../docs/agent-guide/cli.md?raw';
 import imageToPlan from '../../../docs/agent-guide/image-to-plan.md?raw';
 import intro from '../../../docs/agent-guide/intro.md?raw';
+import mcpIntro from '../../../docs/agent-guide/mcp-intro.md?raw';
+import mcpText from '../../../docs/agent-guide/mcp.md?raw';
 import format from '../../../docs/plan-format.md?raw';
 import { CliError } from './files.js';
 
 /** The placeholder for the command that starts the CLI. The package name is not final (roadmap, open questions). */
 export const CLI_PLACEHOLDER = '<cli>';
-export const GUIDE_FORMS = ['text', 'agents-md', 'skill', 'llms'] as const;
+export const GUIDE_FORMS = ['text', 'agents-md', 'skill', 'llms', 'mcp'] as const;
 export type GuideForm = typeof GUIDE_FORMS[number];
 
 /** Replaces exactly one occurrence, so a change to a source text that this code depends on fails the build check. */
@@ -29,14 +31,30 @@ function demote(markdown: string, levels: number): string {
 }
 
 const PLACEHOLDER_NOTE = '**`<cli>` in this guide** is the command that starts the Open Plan CLI on this computer.';
+const SCHEMA_LINK = 'The full structural rules are in [`open-plan.schema.json`](open-plan.schema.json).';
+
+/**
+ * The guide for the MCP server (roadmap C5): the MCP intro and tool part in place of the CLI ones; the image rules, the
+ * format and the command contracts are the same text.
+ */
+function mcpGuide(): string {
+  const formatPart = replaceOnce(format, SCHEMA_LINK, 'The full structural rules (the JSON Schema) are given by the tool `get_schema`.');
+  return [mcpIntro, imageToPlan, demote(formatPart, 1), mcpText, commands].map(part => part.trim()).join('\n\n') + '\n';
+}
+
+/** The MCP server's `instructions`: short, because some clients shorten or hide long instructions. */
+export function mcpInstructions(): string {
+  return [mcpIntro, imageToPlan].map(part => part.trim()).join('\n\n') + '\n';
+}
 
 /**
  * The guide in one form. `cli` replaces the placeholder with a concrete command (for example the local build in the
  * C4b exercise); the sentence that explains the placeholder then names that command instead.
  */
 export function guideText(form: GuideForm = 'text', cli?: string): string {
+  if (form === 'mcp') return mcpGuide();
   // The format description links to the schema file next to it in the repository; the CLI prints the schema instead.
-  const formatPart = replaceOnce(format, 'The full structural rules are in [`open-plan.schema.json`](open-plan.schema.json).', 'The full structural rules (the JSON Schema) are printed by `<cli> schema`.');
+  const formatPart = replaceOnce(format, SCHEMA_LINK, 'The full structural rules (the JSON Schema) are printed by `<cli> schema`.');
   let body = [intro, imageToPlan, demote(formatPart, 1), cliText, commands].map(part => part.trim()).join('\n\n') + '\n';
   if (!body.includes(PLACEHOLDER_NOTE)) throw new Error('The agent guide must explain the <cli> placeholder.');
   if (cli) {
@@ -55,5 +73,6 @@ export function guideText(form: GuideForm = 'text', cli?: string): string {
 export function guide(form: string = 'text', cli?: string) {
   if (!(GUIDE_FORMS as readonly string[]).includes(form)) throw new CliError('USAGE', `--form must be one of: ${GUIDE_FORMS.join(', ')}.`);
   if (cli !== undefined && !cli.trim()) throw new CliError('USAGE', '--cli must name a command.');
+  if (cli !== undefined && form === 'mcp') throw new CliError('USAGE', '--cli is not used in the mcp form.');
   return { ok: true as const, form, text: guideText(form as GuideForm, cli), notices: [] as string[] };
 }

@@ -15,6 +15,7 @@ Add `--json` to any command for one JSON object on standard output. Each result 
 | `<cli> backups plan.json` | Lists the backups of the plan. |
 | `<cli> restore plan.json <backup-name>` | Restores a backup. The current file is backed up first. |
 | `<cli> serve plan.json` | Opens the plan in the editor for the user (see below). |
+| `<cli> mcp [--root <folder>]` | Starts the Open Plan MCP server on standard input and output, for the MCP setup of an agent. Its tools work only on files in the root folder (default: the folder where it starts). |
 
 **Exit codes:** 0 success; 1 validation errors, refused commands or a refused file; 2 incorrect usage; 3 `REVISION_CONFLICT`; 4 the plan is locked; 5 a file or backup error.
 
@@ -27,3 +28,33 @@ Add `--json` to any command for one JSON object on standard output. Each result 
 **`serve`:** `<cli> serve plan.json` starts the editor for the user on `http://127.0.0.1:5190` (or the next free port) and prints a link with a secret token; do not share it. It runs until Ctrl+C. The editor shows each change to the file at once, also changes from `apply`. The user's edits in the editor are saved to the file, so read the revision again before you send commands. Start it only when the user asks; it keeps running.
 
 **Editing the file directly:** you can write the plan file yourself (for the first version from an image). Then run `validate`. For changes to an existing plan, use `apply`: it checks the revision, so it does not write over a change that the user made in the editor.
+
+### Sending a batch
+
+`<cli> apply plan.json commands.json` sends a batch of commands (see "Commands"). `commands.json` is one object:
+
+```json
+{
+  "expectedRevision": "<the revision from validate or info>",
+  "commands": [
+    { "op": "set_plan_name", "name": "My apartment" },
+    { "op": "add_furniture", "type": "sofa", "name": "Sofa", "cx": 2000, "cy": 1500, "w": 2000, "d": 900 }
+  ]
+}
+```
+
+`REVISION_CONFLICT` gives exit code 3, and `COMMANDS_REFUSED` exit code 1.
+
+### A refused batch
+
+This batch puts a door where the window `win1` is:
+
+```json
+[{ "op": "add_opening", "type": "door", "wallId": "w1", "offset": 600, "width": 900, "hinge": "start", "swing": "left" }]
+```
+
+`<cli> apply plan.json commands.json --json` writes nothing and gives exit code 1:
+
+```json
+{"ok":false,"code":"COMMANDS_REFUSED","message":"The commands were refused; the plan was not changed.","errors":[{"commandIndex":0,"path":"commands[0].offset","code":"openings-overlap","params":{"op":"add_opening","openingId":"door","otherId":"win1"}}],"notices":[]}
+```

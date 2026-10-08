@@ -4,7 +4,7 @@ import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { applyCommands, COMMAND_OPS } from 'open-plan-core';
 import { GUIDE_COPIES } from '../scripts/guide-copies.mjs';
-import { CLI, folder, run, runAsync, type Run } from './helpers.js';
+import { CLI, folder, mcpClient, run, runAsync, type Run } from './helpers.js';
 
 // The agent guide (roadmap C4a). It is tested through the built CLI (`guide`, `apply`, `validate`), the interface that
 // an installed agent uses; the command contracts are compared with the core command code.
@@ -13,6 +13,7 @@ const source = (path: string) => readFileSync(join(repo, path), 'utf8');
 const guide = (...args: string[]) => run(repo, 'guide', ...args);
 const text = guide().json.text as string;
 const commandsDoc = source('docs/agent-guide/commands.md');
+const cliDoc = source('docs/agent-guide/cli.md'), mcpDoc = source('docs/agent-guide/mcp.md');
 
 /** The `#### \`op\`` sections of the command reference: op → section text. */
 const sections = new Map<string, string>();
@@ -168,9 +169,9 @@ describe('agent guide: the examples run through the built CLI with real revision
   const results: { name: string; batch: unknown; apply: Run; validate: Run }[] = [];
   let refused: { output: unknown; apply: Run } | null = null;
   beforeAll(async () => {
-    const refusedSection = commandsDoc.slice(commandsDoc.indexOf('### A refused batch'));
+    const refusedSection = cliDoc.slice(cliDoc.indexOf('### A refused batch'));
     const examples = [...sections].flatMap(([op, s]) => jsonBlocks(s).map((batch, i) => ({ name: `${op} example ${i + 1}`, batch })));
-    const envelope = jsonBlocks(commandsDoc.slice(0, commandsDoc.indexOf('### Rules for every command')))[0];
+    const envelope = jsonBlocks(cliDoc.slice(cliDoc.indexOf('### Sending a batch')))[0];
     examples.push({ name: 'the batch envelope', batch: envelope.commands });
     const [refusedBatch, refusedOutput] = jsonBlocks(refusedSection);
     await Promise.all([...examples.map(async ({ name, batch }, i) => {
@@ -206,13 +207,62 @@ describe('agent guide: the examples run through the built CLI with real revision
   });
 });
 
+describe('agent guide: the MCP part, and the examples through the built MCP server with real revisions', () => {
+  it('the command reference has no transport: no CLI command, no command file, no exit code', () => {
+    for (const word of ['<cli>', 'commands.json', 'exit code', 'apply_commands']) expect(commandsDoc, word).not.toContain(word);
+  });
+  it('the MCP part names every tool of the server, and asks for no command file', async () => {
+    const dir = folder(), mcp = await mcpClient(dir);
+    try {
+      const tools = (await mcp.client.listTools()).tools.map(t => t.name);
+      const documented = [...mcpDoc.matchAll(/^\| `(\w+)`/gm)].map(m => m[1]);
+      expect(documented.sort()).toEqual(tools.sort());
+    } finally { await mcp.close(); }
+    expect(mcpDoc).not.toContain('commands.json');
+    expect(mcpDoc).not.toContain('<cli>');
+  });
+  it('the envelope, every example of every command, and the refused batch work as documented through apply_commands', async () => {
+    const examples = [...sections].flatMap(([op, s]) => jsonBlocks(s).map((batch, i) => ({ name: `${op} example ${i + 1}`, batch })));
+    const envelope = jsonBlocks(mcpDoc.slice(mcpDoc.indexOf('### Sending a batch')))[0];
+    expect(Object.keys(envelope).sort()).toEqual(['commands', 'expectedRevision', 'path']);
+    const [refusedBatch, refusedOutput] = jsonBlocks(mcpDoc.slice(mcpDoc.indexOf('### A refused batch')));
+    const dir = folder(), mcp = await mcpClient(dir);
+    try {
+      const all = [...examples, { name: 'the MCP envelope', batch: envelope.commands }];
+      for (const [i, { name, batch }] of all.entries()) {
+        const path = `plan${i}.json`;
+        writeFileSync(join(dir, path), JSON.stringify(examplePlan, null, 2));
+        const { revision } = (await mcp.call('read_plan', { path })).result;
+        const applied = await mcp.call('apply_commands', { ...envelope, path, expectedRevision: revision, commands: batch });
+        expect(applied.result, name).toMatchObject({ ok: true, previousRevision: revision });
+        expect(applied.result.revision, name).not.toBe(revision);
+        expect((await mcp.call('validate_plan', { path })).result.ok, name).toBe(true);
+      }
+      writeFileSync(join(dir, 'refused.json'), JSON.stringify(examplePlan, null, 2));
+      const { revision } = (await mcp.call('read_plan', { path: 'refused.json' })).result;
+      const refused = await mcp.call('apply_commands', { path: 'refused.json', expectedRevision: revision, commands: refusedBatch });
+      expect(refused.isError).toBe(true);
+      expect(refused.result).toEqual(refusedOutput);
+    } finally { await mcp.close(); }
+  }, 120_000);
+});
+
 describe('agent guide: the forms', () => {
   it('`guide` prints the whole guide: the loop, the image steps, the format with its example, the CLI and the commands', () => {
     for (const part of ['## Work loop', '## From an image to a plan', '## Open Plan format (schemaVersion 2)', '## CLI commands', '## Commands', '#### `scale_plan`', '"schemaVersion": 2']) expect(text).toContain(part);
     expect(text).toContain(source('docs/agent-guide/image-to-plan.md').trim());
+    expect(text).not.toContain('## MCP tools');
+  });
+  it('the mcp form has the same image rules, format and commands, with the MCP part in place of the CLI part', () => {
+    const mcp = guide('--form', 'mcp').json.text as string;
+    for (const part of ['## Work loop', '## From an image to a plan', '## Open Plan format (schemaVersion 2)', '## MCP tools', '## Commands', '#### `scale_plan`', 'given by the tool `get_schema`']) expect(mcp).toContain(part);
+    for (const shared of ['docs/agent-guide/image-to-plan.md', 'docs/agent-guide/commands.md']) expect(mcp).toContain(source(shared).trim());
+    expect(mcp).not.toContain('<cli>');
+    expect(mcp).not.toContain('## CLI commands');
+    expect(guide('--form', 'mcp', '--cli', 'x')).toMatchObject({ code: 2, json: { code: 'USAGE' } });
   });
   it('every form is self-contained: no link to a repository file', () => {
-    for (const form of ['text', 'agents-md', 'skill', 'llms']) {
+    for (const form of ['text', 'agents-md', 'skill', 'llms', 'mcp']) {
       const out = guide('--form', form).json.text as string;
       expect(out.match(/\]\((?!https?:)[^)]*\)/g), form).toBeNull();
       expect(out, form).not.toContain('open-plan.schema.json');
