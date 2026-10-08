@@ -574,6 +574,12 @@ Forms:
 - **MCP:** the server connects and all tools work in at least **Claude Code and Codex**, end to end from a real floor-plan image to a valid plan shown in `serve`. For Gemini CLI, Cursor and OpenCode, connection and `validate_plan` are tested. Record the agent versions and results.
 - **Guide:** an agent in scope, with only the guide and a floor-plan image, makes a plan that passes `validate`. Record the agent, the image and the errors it corrected by itself.
 
+**Status (2026-10-08, after C3):**
+
+- **Core parity:** `apps/web/test/validation-parity.test.js` sends every B2 fixture (shared from `packages/core/test/validation-fixtures.ts`), four v1 files and two unreadable files through the website's import (`readImportFile`) and saved-plan load (`loadDocument`) and through the built CLI (`validate`, `info`). All 71 give the same issues (code, path, params, order): 44 blocking, 21 tolerable (an import error, a saved warning), 6 valid. Mutations of the CLI policy and of the website's v1 path each make it fail.
+- **Live file mode:** `tools/checks/serve.mjs` now requires an external change to appear within 1 s: 33 to 58 ms with the folder watcher in 5 runs (CLI apply and a direct write). With the watcher turned off (the 1 s check alone), 114 to 833 ms in 9 runs; the fallback is not a guaranteed deadline (C3). In 1 of those 9 runs, "page close" failed once; it has not failed with the watcher on.
+- **Met:** CLI loop, backups (CLI part), security, the CLI part of concurrent writers, and the invalid-file part. **Wait for C5:** MCP, and the MCP parts of concurrent writers and backups. **Wait for C4:** the guide.
+
 ## Step D: background image, calibration and editing
 
 **Goal:** the user can see and correct the agent's errors.

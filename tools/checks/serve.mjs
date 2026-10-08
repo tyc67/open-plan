@@ -82,11 +82,12 @@ try {
   check('website storage is not used', (await page.evaluate(() => localStorage.getItem('open-plan:document:v1'))) === null);
 
   // 3. File to browser: an agent's change loads at once when there is no unsaved edit, resets undo, and causes no write.
+  // Step C "done when": an external edit appears in the open browser within 1 s (from the end of the write).
   await sleep(600);
   const putsBefore = puts.length;
   const agentRevision = apply([{ op: 'set_plan_name', name: 'From the agent' }]);
   const loaded = await until(async () => (await shownName()) === 'From the agent');
-  check('file to browser: the agent change appears', loaded >= 0, `${loaded} ms`);
+  check('file to browser: the agent change (CLI apply, an atomic rename) appears within 1 s', loaded >= 0 && loaded <= 1000, `${loaded} ms`);
   await sleep(1200);
   check('file to browser: loading it writes nothing (same revision, no request)', revision() === agentRevision && puts.length === putsBefore, `${puts.length - putsBefore} writes`);
   check('file to browser: the undo history starts again', (await undoSteps()) === 0);
@@ -95,6 +96,7 @@ try {
   const minified = JSON.stringify(normalized); writeFileSync(plan, minified);
   const loaded2 = await until(async () => (await shownName()) === 'Minified, no heights');
   await sleep(1200);
+  check('file to browser: a direct write of the file appears within 1 s', loaded2 >= 0 && loaded2 <= 1000, `${loaded2} ms`);
   check('file to browser: a normalized file version also causes no write', loaded2 >= 0 && fileText() === minified && puts.length === putsBefore, `${puts.length - putsBefore} writes`);
 
   // 4. Conflict during a gesture, resolved with 保留我的版本: the file gets the browser plan; the file version is backed up.
