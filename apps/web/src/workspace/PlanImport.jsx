@@ -118,17 +118,20 @@ export function EmptyPlanActions({onImport,onLoadSample,agentPrompt}) {
   </div>;
 }
 
-/** Privacy text for the website version. A desktop version will need its own text (roadmap B3, "mode-aware"). */
-export const PRIVACY_TEXT='Open Plan 不會上傳你的圖片或平面圖。此網站版把資料存在這個瀏覽器中。你把圖片交給 AI 助理時，圖片由該助理處理。';
+/** Privacy text for each storage mode (roadmap B3, C3). */
+export const PRIVACY_TEXT={
+  website:'Open Plan 不會上傳你的圖片或平面圖。此網站版把資料存在這個瀏覽器中。你把圖片交給 AI 助理時，圖片由該助理處理。',
+  file:'Open Plan 不會上傳你的圖片或平面圖。本機檔案模式把資料存在你電腦上的檔案中。你把圖片交給 AI 助理時，圖片由該助理處理。',
+};
 
 /** The agent prompt with its copy button and the privacy text, for the plan panel. */
-export function AgentPromptCard({agentPrompt}) {
+export function AgentPromptCard({agentPrompt,mode}) {
   return <div className="workspace-card" data-agent-prompt>
     <h3 className="flex items-center gap-1.5"><Bot className="size-4"/>用 AI 助理產生平面圖</h3>
     <p className="workspace-help mt-1">複製提示，連同平面圖圖片交給 AI 助理，再匯入它回覆的 JSON。</p>
     <textarea readOnly value={agentPrompt} aria-label="AI 提示內容" className="mt-2 h-24 w-full resize-y rounded-lg border border-[#dce4ef] bg-slate-50 p-2 font-mono text-[10px] dark:border-[#3a4c67] dark:bg-[#101827]"/>
     <div className="mt-2 grid"><CopyButton text={agentPrompt} label="複製 AI 提示"/></div>
-    <p className="workspace-help mt-2" data-privacy>{PRIVACY_TEXT}</p>
+    <p className="workspace-help mt-2" data-privacy>{PRIVACY_TEXT[mode]}</p>
   </div>;
 }
 

@@ -66,6 +66,10 @@ try {
   const label = await page.locator('[data-storage-mode="file"]').innerText();
   check('mode: the indicator shows local file mode and the file', label.startsWith('本機檔案模式 · ') && label.endsWith('plan.json'), label);
   check('open: the editor shows the file plan', (await shownName()) === fileJson().name);
+  const panelText = selector => page.locator(selector).first().textContent();
+  check('mode: the privacy text and the storage help are for local file mode', (await panelText('[data-privacy]')).includes('本機檔案模式把資料存在你電腦上的檔案中') &&
+    (await panelText('[data-storage-help]')).includes('plan.json') && !(await panelText('[data-storage-help]')).includes('瀏覽器內'));
+  check('mode: no website session-snapshot button in file mode', (await page.getByRole('button', { name: '復原開始編輯前的平面圖' }).count()) === 0);
 
   // 2. A browser edit is written to the file; the session's first write backs the file up first, later ones do not.
   const original = fileText();
@@ -257,10 +261,10 @@ try {
   check('reconnect with an unsaved edit: 保留我的版本 writes the edit', (await until(() => cx(fileJson(), 'sample-f4') === 7777)) >= 0);
   await tab.close(); proxy.close();
 
-  // 13. Website mode on the same address has no file-mode indicator and no access to the file.
+  // 13. Website mode on the same address shows the website indicator and has no access to the file.
   const website = await context.newPage();
   await website.goto(started.url.split('#')[0]); await website.waitForSelector('svg.plan-svg');
-  check('website mode: no file-mode indicator', (await website.locator('[data-storage-mode]').count()) === 0);
+  check('website mode: the website indicator, not the file one', (await website.locator('[data-storage-mode="website"]').innerText()) === '網站模式 · 儲存在此瀏覽器' && (await website.locator('[data-storage-mode="file"]').count()) === 0);
   await website.close();
 
   check('no page errors', errors.length === 0, errors.join(' | '));

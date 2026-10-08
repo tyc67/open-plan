@@ -1,10 +1,12 @@
 // Packed install test (roadmap C2b): packs the CLI, installs the package with npm in a new folder outside the
 // repository, and runs the installed command. It shows that the installed CLI needs no workspace package and no
-// repository file. It needs the npm registry (resvg is an npm dependency), so it is not part of `pnpm test`.
+// repository file, and that the installed `serve` gives the bundled editor and the file API. It needs the npm
+// registry (resvg is an npm dependency), so it is not part of `pnpm test`.
 // Run: pnpm --filter open-plan-cli build && pnpm --filter open-plan-cli test:pack
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -52,6 +54,25 @@ try {
   check('render gives the same bytes as the workspace build', local.status === 0 && readFileSync(join(app, 'plan.png')).equals(readFileSync(join(work, 'local.png'))));
   const restored = cli('restore', 'plan.json', applied.json?.backup ?? '');
   check('restore', restored.code === 0 && JSON.parse(readFileSync(join(app, 'plan.json'), 'utf8')).name !== 'Packed');
+
+  // serve from the installed package: the bundled editor and the file API, then a clean stop.
+  const port = await new Promise(done => { const s = createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => done(p)); }); });
+  const server = spawn(bin, ['serve', 'plan.json', '--no-open', '--json', '--port', String(port)], { cwd: app });
+  try {
+    const started = await new Promise((done, fail) => { server.stdout.once('data', d => done(JSON.parse(String(d)))); server.once('exit', code => fail(new Error(`serve ended with ${code}`))); });
+    const base = `http://127.0.0.1:${port}`, token = new URL(started.url).hash.replace('#token=', '');
+    const page = await fetch(`${base}/`).then(async r => ({ status: r.status, text: await r.text() }));
+    const script = /<script[^>]+src="\/?([^"]+\.js)"/.exec(page.text)?.[1];
+    const asset = script ? await fetch(`${base}/${script}`) : null;
+    check('serve: the bundled editor page and its script', page.status === 200 && page.text.includes('<div id="root">') && asset?.status === 200 && /javascript/.test(asset.headers.get('content-type') ?? ''), script);
+    const state = await fetch(`${base}/api/plan`, { headers: { 'x-open-plan-token': token } }).then(r => r.json());
+    check('serve: the file API with the token gives the plan and its revision', state.ok && state.state.revision === createHash('sha256').update(readFileSync(join(app, 'plan.json'))).digest('hex') && state.state.plan.name === JSON.parse(readFileSync(join(app, 'plan.json'), 'utf8')).name);
+    check('serve: the file API without the token is refused', (await fetch(`${base}/api/plan`)).status === 401);
+  } finally {
+    const ended = server.exitCode !== null ? Promise.resolve(server.exitCode) : new Promise(done => server.once('exit', code => done(code)));
+    server.kill('SIGTERM');
+    check('serve: stops cleanly on SIGTERM', (await ended) === 0);
+  }
   console.log(`node ${process.version}, npm ${execFileSync('npm', ['--version'], { encoding: 'utf8' }).trim()}, ${process.platform} ${process.arch}`);
 } finally {
   rmSync(work, { recursive: true, force: true });

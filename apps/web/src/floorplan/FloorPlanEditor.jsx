@@ -3,7 +3,7 @@ import ErrorBoundary from '../ErrorBoundary.jsx';
 import { createEmptyPlan, createId, createSamplePlan, fitBounds, planGeometry, roomArea, validatePlan } from 'open-plan-core';
 import { RotateCw, Trash2 } from 'lucide-react';
 import WorkspaceShell from '../workspace/WorkspaceShell.jsx';
-import { backupBeforeReplace, loadDocument, preserveUnreadableDocument, replacedDocument, saveDocument } from './storage.js';
+import { backupBeforeReplace, loadDocument, preserveUnreadableDocument, replacedDocument, saveDocument, sessionDocument } from './storage.js';
 import { readImportFile } from './planFile.js';
 import { createFileSync } from './fileSession.js';
 import { issueMessage } from './issueMessages.js';
@@ -141,8 +141,8 @@ export default function FloorPlanEditor({ fileSession = null }) {
     const timer = setTimeout(() => {
       // File mode writes through the file session, which writes only when the plan differs from the file.
       if (fileSync.current) { fileSync.current.save(); return; }
-      try { saveDocument(doc); setStatus('已儲存到此裝置'); }
-      catch (error) { setStatus(`Save failed: ${error.message}`); }
+      try { saveDocument(doc); setStatus('已儲存到此裝置'); setCanRestoreSession(!!sessionDocument()); }
+      catch (error) { setStatus(`儲存失敗：${error.message}`); }
     },400);
     return () => clearTimeout(timer);
   },[doc]);
@@ -319,7 +319,7 @@ export default function FloorPlanEditor({ fileSession = null }) {
   useEffect(()=>{spaceHeld.current=false;setSpacePan(false);},[view]);
   function saveNow() {
     if(fileSync.current){fileSync.current.save();return;}
-    try {saveDocument(doc);setStatus(autosave.current?'已儲存到此裝置':'已儲存到此裝置，自動儲存已恢復');autosave.current=true;}catch(error){setStatus(`儲存失敗：${error.message}`);}
+    try {saveDocument(doc);setStatus(autosave.current?'已儲存到此裝置':'已儲存到此裝置，自動儲存已恢復');autosave.current=true;setCanRestoreSession(!!sessionDocument());}catch(error){setStatus(`儲存失敗：${error.message}`);}
   }
   function rename(name) {if(name!==doc.name)commit({...doc,name});}
   function removeSelected() {if(item&&!layers.locked.furniture){commit({...doc,furniture:doc.furniture.filter(f=>f.id!==item.id)});setSelected(null);}}
@@ -370,6 +370,14 @@ export default function FloorPlanEditor({ fileSession = null }) {
   }
   const [canRestore,setCanRestore]=useState(()=>fileSession?fileSession.hasReplaced:!!replacedDocument());
   const [replaceNotice,setReplaceNotice]=useState(initial.notice);
+  // Website mode: the session snapshot (the saved plan from before the first change of a page load). It is a
+  // replacement like any other, so the open plan is backed up first and 復原上一個平面圖 brings it back.
+  const [canRestoreSession,setCanRestoreSession]=useState(()=>!fileSession&&!!sessionDocument());
+  function restoreSession() {
+    const snapshot=sessionDocument();
+    if(!snapshot){setCanRestoreSession(false);setReplaceNotice({tone:'error',text:'找不到開始編輯前的平面圖，或它已損壞。',actions:[]});return;}
+    replacePlan(snapshot.plan,'已復原開始編輯前的平面圖。目前的平面圖已備份。');
+  }
   // Tolerable issues of the open plan, checked again after each change, so the list is never out of date.
   const planWarnings=useMemo(()=>validatePlan(doc,'saved').warnings,[doc]);
   // Import (roadmap B3): read and check the file, show the summary or the errors, and replace only after confirmation.
@@ -410,7 +418,10 @@ export default function FloorPlanEditor({ fileSession = null }) {
     onRestorePrevious:restorePrevious,canRestore,
     notice:fileNotice??replaceNotice,onDismissNotice:()=>setReplaceNotice(null),
     warnings:planWarnings,loadErrors:initial.loadErrors,
-    storage:fileSession?{kind:'file',label:`本機檔案模式 · ${fileSession.path}`,saveLabel:'儲存到檔案'}:null,
+    storage:fileSession
+      ?{kind:'file',label:`本機檔案模式 · ${fileSession.path}`,saveLabel:'儲存到檔案',help:`專案保存在你電腦上的檔案（${fileSession.path}）。每個瀏覽器工作階段第一次寫入前，以及每次取代或載入檔案版本前，舊的版本會存到檔案旁的備份資料夾。要換到網站版時，先匯出 JSON，再匯入。`}
+      :{kind:'website',label:'網站模式 · 儲存在此瀏覽器',saveLabel:'儲存到此裝置',help:'專案保存在這個瀏覽器內。要換電腦時，先匯出 JSON，再在另一台電腦匯入。多專案管理尚未加入。'},
+    onRestoreSession:fileSession?null:restoreSession,canRestoreSession,
   };
   return <WorkspaceShell planActions={planActions} unit={unit} onUnit={setUnit} doc={doc} status={tool==='measure'&&view==='2d'?'點選兩點或拖曳測量 · Shift 鎖定水平／垂直 · Esc 取消':status} view={view} onView={setView} tool={spacePan?'pan':tool} onTool={setTool}
     selected={selected} selectedRoom={room?.id} selectedWall={wall?.id} selectionRequest={selectionRequest} history={history} onSelect={selectFurniture} onRestore={snapshot=>{swapPlanGeneration();commit(snapshot);}}
