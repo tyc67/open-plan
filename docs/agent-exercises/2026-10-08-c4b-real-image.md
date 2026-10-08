@@ -1,6 +1,6 @@
 # C4b: real-image exercise (2026-10-08)
 
-Two agents, each in a fresh session, made an Open Plan file from one real floor-plan image with only the agent guide and the installed CLI (roadmap C4b, Step B "Real image"). This record holds no image and no plan file; it gives their full SHA-256 values. The image, both plans, the run logs, the packed CLI, the guide, the prompt and the website screenshots are kept locally, outside the repository, in `~/Documents/open-plan-agent-exercises/2026-10-08-c4b/`.
+Two agents, each in a fresh session, made an Open Plan file from one real floor-plan image, using the supplied agent guide, the image and the installed CLI (not fully isolated: see the correction below) (roadmap C4b, Step B "Real image"). This record holds no image and no plan file; it gives their full SHA-256 values. The image, both plans, the run logs, the packed CLI, the guide, the prompt and the website screenshots are kept locally, outside the repository, in `~/Documents/open-plan-agent-exercises/2026-10-08-c4b/`.
 
 ## Inputs
 
@@ -11,7 +11,7 @@ Two agents, each in a fresh session, made an Open Plan file from one real floor-
 
   > Read GUIDE.md in this folder. Make an Open Plan plan file, plan.json, in this folder from the floor-plan image floorplan.jpg. Follow the work loop in the guide: write the plan, run validate and correct every error, render the plan and compare the PNG with the image, and correct the differences. Use the CLI command that the guide gives. Work only in this folder. At the end, report the dimension that you used to set the scale, and each part of the plan that you are not sure about.
 
-- **Isolation:** two separate folders outside the repository, with only `GUIDE.md`, `floorplan.jpg` and the installed CLI. Neither run could see the other's folder by instruction, and neither folder had an `AGENTS.md` or `CLAUDE.md`.
+- **Isolation:** two separate folders outside the repository, with only `GUIDE.md`, `floorplan.jpg` and the installed CLI. Neither run could see the other's folder by instruction, and neither folder had an `AGENTS.md` or `CLAUDE.md`. Global instructions outside the folders: see the correction below.
 
 ## Agents
 
@@ -20,9 +20,11 @@ Two agents, each in a fresh session, made an Open Plan file from one real floor-
 | Version | Claude Code 2.1.285 | codex-cli 0.160.0 |
 | Model | `claude-opus-5-5` | `gpt-6.1-sol`, reasoning effort low (from the user's config) |
 | Command | `claude -p "$(cat prompt.txt)" --setting-sources project,local --permission-mode acceptEdits --allowedTools "Bash Read Write Edit Glob Grep" --output-format stream-json --verbose` | `codex exec -C <folder> --skip-git-repo-check -s workspace-write -i floorplan.jpg --json "$(cat prompt.txt)"` |
-| Global instructions | Off: `--setting-sources project,local` leaves out `~/.claude/CLAUDE.md` (tested before the run) | None exist (`~/.codex` has no `AGENTS.md`; the config sets only the model) |
+| Global instructions | **Likely loaded** (corrected after C5c preparation, see below) | No `AGENTS.md` (`~/.codex` has none); the config also enables a plugin (`neon-postgres`), and the `apps` feature was on (corrected, see below) |
 | Image | Read from the folder with its file tool | Attached with `-i`, and also in the folder |
 | Run | 29 turns, 543 s, US$1.85 | 12 shell commands; 489 k input tokens (458 k cached), 5.1 k output |
+
+**Correction (2026-10-08, C5c preparation).** This record first said that `--setting-sources project,local` left out the global `~/.claude/CLAUDE.md` ("tested before the run"). C5c preparation reproduced global instruction loading with the same Claude Code version and flags: asked to quote its instruction files, the session quoted `~/.claude/CLAUDE.md` (the user's instructions to write in ASD-STE100 Simplified Technical English and to read `CONTEXT.md` files). C4b's earlier claim that those flags disabled it was unsupported. The original C4b log does not establish whether the file was loaded (its init event does not list instruction files), so the Claude Code run is **likely affected**. For Codex, the record said that the config sets only the model; it also enables the `neon-postgres` plugin, and the `apps` feature was on, so tools from them may have been available (its log shows only 12 shell commands and 4 messages, no tool from either). **What stays:** the valid plans, the imports, the rendering and the geometry results. **What changes:** the claim that each agent worked only from the guide and the image; the exercise was not fully isolated.
 
 ## What each agent did
 
@@ -87,6 +89,6 @@ Findings 1, 3 and 4 are resolved by the C4 follow-up (see the roadmap); 2 and 5 
 
 ## Result
 
-- **C4b:** the CLI workflow is accepted: two agents, each with only the guide, the image and the installed CLI, made a plan that passes `validate`, imports in the website, and draws in 2D and 3D. In this exercise, Claude Code's result was better: its plan matches the image closely, and Codex's plan has the errors listed above. The two runs used different models and reasoning settings, so this is not a general ranking of the agents.
+- **C4b:** the CLI workflow is accepted: two agents, using the supplied guide, image and installed CLI, made a plan that passes `validate`, imports in the website, and draws in 2D and 3D (Claude Code likely also had the user's global `CLAUDE.md`, see the correction). In this exercise, Claude Code's result was better: its plan matches the image closely, and Codex's plan has the errors listed above. The two runs used different models and reasoning settings, so this is not a general ranking of the agents.
 - **Step B "Real image": closed** by the user's decision (2026-10-08), without a separate human review. The image license is confirmed.
 - **Not covered:** the C5 MCP exercise (these runs used the CLI); Gemini CLI, Cursor and OpenCode.
