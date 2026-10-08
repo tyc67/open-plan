@@ -71,7 +71,7 @@ The image mask is the image pixels with luminance below 130, after one erosion (
 
 In the overlay pictures, Claude Code's walls lie on the image walls almost everywhere; Codex's misses are the balcony edges (as full walls), the extra wall near bedroom 2 and the openings in the sofa wall. The script (`overlay/overlay-fit.mjs`, with every threshold), its inputs (the PNG of the image, the two renders and their crops) and the overlay pictures are kept with the record files; it gives the same figures when run again.
 
-**Human check: pending.** The user has not yet confirmed a review or given findings.
+**Human check: not done.** On 2026-10-08 the user closed the Step B image item without a separate visual review. The findings in this record come from the checks above (CLI, website import, label table and overlay), not from a human review.
 
 **Image license:** MIT-licensed, confirmed by the user.
 
@@ -88,5 +88,5 @@ Findings 1, 3 and 4 are resolved by the C4 follow-up (see the roadmap); 2 and 5 
 ## Result
 
 - **C4b:** the CLI workflow is accepted: two agents, each with only the guide, the image and the installed CLI, made a plan that passes `validate`, imports in the website, and draws in 2D and 3D. In this exercise, Claude Code's result was better: its plan matches the image closely, and Codex's plan has the errors listed above. The two runs used different models and reasoning settings, so this is not a general ranking of the agents.
-- **Step B "Real image": stays open** until the user's check is added to this record. The image license is confirmed.
+- **Step B "Real image": closed** by the user's decision (2026-10-08), without a separate human review. The image license is confirmed.
 - **Not covered:** the C5 MCP exercise (these runs used the CLI); Gemini CLI, Cursor and OpenCode.
