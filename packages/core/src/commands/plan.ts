@@ -17,11 +17,15 @@ function setMaterial(plan: PlanV2, c: Extract<PlanCommand, { op: 'set_material' 
   return { plan: { ...plan, materials: { ...plan.materials, [c.key]: material } }, notes: [{ code: replaced ? 'material-replaced' : 'material-created', params: { key: c.key } }] };
 }
 
-/** The ceiling of the whole plan. No opening head may end up above it. */
+/**
+ * The ceiling of the whole plan. No opening head may end up further above it than before (the Step C follow-up rule
+ * for existing issues, as in `checkHeights`): a head that is already above the ceiling does not block a ceiling that
+ * comes closer to it, but a lower ceiling under it, or under a head that was below it, is refused.
+ */
 function setCeilingHeight(plan: PlanV2, c: Extract<PlanCommand, { op: 'set_ceiling_height' }>): Step {
   readFields(c, { required: { ceilingHeight: 'number' } });
   if (c.ceilingHeight < CEILING_MIN || c.ceilingHeight > CEILING_MAX) refuse('ceilingHeight', 'height-out-of-range', { min: CEILING_MIN, max: CEILING_MAX, value: c.ceilingHeight });
-  const above = plan.openings.find(o => o.head > c.ceilingHeight);
+  const above = plan.openings.find(o => o.head > c.ceilingHeight && o.head - c.ceilingHeight > Math.max(0, o.head - plan.ceilingHeight));
   if (above) refuse('ceilingHeight', 'opening-head-above-ceiling', { openingId: above.id, head: above.head, use: ['update_opening'] });
   return { plan: { ...plan, ceilingHeight: c.ceilingHeight } };
 }

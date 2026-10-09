@@ -4,7 +4,7 @@ Add `--json` to any command for one JSON object on standard output. Each result 
 
 | Command | What it does |
 | --- | --- |
-| `<cli> guide` | Prints this guide. |
+| `<cli> guide [--form text\|agents-md\|skill\|llms\|mcp] [--cli <command>]` | Prints this guide, in one of its forms; `--cli` puts your CLI command in place of `<cli>` (not for the `mcp` form). |
 | `<cli> schema` | Prints the JSON Schema and the field description of the format. |
 | `<cli> new plan.json [--sample] [--replace]` | Writes an empty plan, or the sample apartment. An existing file is refused unless `--replace`; then it is backed up first. |
 | `<cli> validate plan.json` | Checks the plan with the strict rules: an issue that the editor only warns about is an error here. Gives the `revision`. |
@@ -14,18 +14,18 @@ Add `--json` to any command for one JSON object on standard output. Each result 
 | `<cli> migrate old.json plan.json [--replace]` | Converts a schema version 1 file to version 2, with a report. |
 | `<cli> backups plan.json` | Lists the backups of the plan. |
 | `<cli> restore plan.json <backup-name>` | Restores a backup. The current file is backed up first. |
-| `<cli> serve plan.json` | Opens the plan in the editor for the user (see below). |
+| `<cli> serve plan.json [--port n] [--host address] [--no-open]` | Opens the plan in the editor for the user (see below). |
 | `<cli> mcp [--root <folder>]` | Starts the Open Plan MCP server on standard input and output, for the MCP setup of an agent. Its tools work only on files in the root folder (default: the folder where it starts). |
 
-**Exit codes:** 0 success; 1 validation errors, refused commands or a refused file; 2 incorrect usage; 3 `REVISION_CONFLICT`; 4 the plan is locked; 5 a file or backup error.
+**Exit codes:** 0 success; 1 validation errors, refused commands, or an input that cannot be used (a missing file `FILE_NOT_FOUND`, a commands file that is not JSON `JSON_INVALID`, a refused file); 2 incorrect usage; 3 `REVISION_CONFLICT`; 4 the plan is locked; 5 a read, write or backup failure (`IO_ERROR`, `BACKUP_FAILED`).
 
-**Revision:** the `revision` is the SHA-256 of the raw bytes of the plan file, as 64 hex characters. Any change to the bytes changes it, also a change of formatting. `validate`, `info` and `render` give it.
+**Revision:** the `revision` is the SHA-256 of the raw bytes of the plan file, as 64 hex characters. Any change to the bytes changes it, also a change of formatting. `validate`, `info` and `render` give it. If there is no plan file at the path (it was deleted after you read it, or the path is wrong), `apply` gives `REVISION_CONFLICT` with `currentRevision: null` (exit code 3), and creates nothing.
 
 **Backups:** each command that writes the plan (`apply`, `new --replace`, `migrate --replace`, `restore`) first copies the current file to the folder `plan.json.backups` next to it. The 20 newest backups are kept. If a backup cannot be written, the command writes nothing. `apply` writes nothing, and makes no backup, when the commands do not change the plan.
 
 **Lock:** while a command writes, the file `plan.json.lock` exists, and other writers wait. Do not remove it unless an error tells you to.
 
-**`serve`:** `<cli> serve plan.json` starts the editor for the user on `http://127.0.0.1:5190` (or the next free port) and prints a link with a secret token; do not share it. It runs until Ctrl+C. The editor shows each change to the file at once, also changes from `apply`. The user's edits in the editor are saved to the file, so read the revision again before you send commands. Start it only when the user asks; it keeps running.
+**`serve`:** `<cli> serve plan.json` starts the editor for the user on `http://127.0.0.1:5190` (or the next free port) and prints a link with a secret token; do not share it. It runs until Ctrl+C. `--port` chooses the port (it must be free); `--no-open` does not open a browser; `--host` also accepts connections on one more address, for example the computer's LAN address (plain HTTP, so only on a network that you trust; a wildcard such as `0.0.0.0` is refused). The editor shows each change to the file at once, also changes from `apply`. The user's edits in the editor are saved to the file, so read the revision again before you send commands. Start it only when the user asks; it keeps running.
 
 **Editing the file directly:** you can write the plan file yourself (for the first version from an image). Then run `validate`. For changes to an existing plan, use `apply`: it checks the revision, so it does not write over a change that the user made in the editor.
 

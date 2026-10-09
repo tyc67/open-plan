@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createHash } from 'node:crypto';
-import { chmodSync, existsSync, linkSync, mkdirSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, linkSync, mkdirSync, readdirSync, readFileSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { join } from 'node:path';
 import { createSamplePlan } from 'open-plan-core';
@@ -135,6 +135,12 @@ describe('apply', () => {
     const r = run(dir, 'apply', 'plan.json', commands(dir, revision, [{ op: 'set_plan_name', name: 'A' }, { op: 'delete_wall', wallId: 'nope' }]));
     expect([r.code, r.json.code, r.json.errors[0]]).toEqual([1, 'COMMANDS_REFUSED', { commandIndex: 1, path: 'commands[1].wallId', code: 'wall-missing', params: { op: 'delete_wall', wallId: 'nope' } }]);
     expect([read(plan), backupsOf(plan)]).toEqual([before, []]);
+  });
+  it('a plan deleted after it was read: REVISION_CONFLICT with currentRevision null (exit 3), and nothing is created', () => {
+    const { dir, plan, revision } = samplePlan();
+    unlinkSync(plan);
+    const r = run(dir, 'apply', 'plan.json', commands(dir, revision, [{ op: 'set_plan_name', name: 'A' }]));
+    expect([r.code, r.json.code, r.json.currentRevision, existsSync(plan)]).toEqual([3, 'REVISION_CONFLICT', null, false]);
   });
   it('a v1 plan file must be migrated first', () => {
     const dir = folder(); writeFileSync(join(dir, 'old.json'), read(V1_SAMPLE));

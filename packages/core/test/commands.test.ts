@@ -496,3 +496,81 @@ describe('decimal lengths through wall changes', () => {
     expect(validatePlan(negative, 'import').errors.map(e => e.code)).toEqual(['value-out-of-range']);
   });
 });
+
+describe('existing tolerable issues on the changed item (Step C follow-up)', () => {
+  // The issue is already in the saved plan; the command is checked against the item just before it.
+  const withDoorHead = (head: number) => { const plan = base(); (plan.openings[1] as DoorV2).head = head; return plan; };
+  const err = (commands: unknown[], plan: PlanV2) => { const e = refused(commands, plan); return [e.commandIndex, e.path, e.code]; };
+
+  it('heights: an unrelated edit keeps the issue; a partial repair is accepted; a worse or new value is refused on the field that changed it', () => {
+    const plan = withDoorHead(2900);                                             // above the 2800 ceiling: a saved warning
+    expect(validatePlan(plan, 'saved').warnings.map(w => w.code)).toEqual(['height-out-of-range']);
+    for (const command of [{ op: 'update_opening', openingId: 'd1', name: 'x' }, { op: 'move_opening', openingId: 'd1', offset: 3000 },
+      { op: 'move_opening', openingId: 'd1', offset: 3500 }, { op: 'resize_opening', openingId: 'd1', width: 800 }, { op: 'update_opening', openingId: 'd1', head: 2850 }]) ok([command], plan);
+    expect(err([{ op: 'update_opening', openingId: 'd1', head: 3000 }], plan)).toEqual([0, 'commands[0].head', 'height-out-of-range']);
+    expect(err([{ op: 'update_opening', openingId: 'd1', head: 2900 }], base())).toEqual([0, 'commands[0].head', 'height-out-of-range']);
+    // In a batch, each command is compared with the state just before it: a repair cannot be undone in part.
+    expect(err([{ op: 'update_opening', openingId: 'd1', head: 2850 }, { op: 'update_opening', openingId: 'd1', head: 2900 }], plan)).toEqual([1, 'commands[1].head', 'height-out-of-range']);
+  });
+  it('a window sill at or above its head: valid to invalid is refused (also equal); a smaller gap is accepted; the field that changed is named', () => {
+    const plan = base(); Object.assign(plan.openings[0], { sill: 2500, head: 2400 });
+    ok([{ op: 'update_opening', openingId: 'win', name: 'x' }], plan);
+    ok([{ op: 'update_opening', openingId: 'win', sill: 2450 }], plan);
+    ok([{ op: 'update_opening', openingId: 'win', sill: 2000 }], plan);
+    expect(err([{ op: 'update_opening', openingId: 'win', sill: 2600 }], plan)).toEqual([0, 'commands[0].sill', 'window-sill-not-below-head']);
+    expect(err([{ op: 'update_opening', openingId: 'win', head: 2300 }], plan)).toEqual([0, 'commands[0].head', 'window-sill-not-below-head']);
+    expect(err([{ op: 'update_opening', openingId: 'win', sill: 2400 }], base())).toEqual([0, 'commands[0].sill', 'window-sill-not-below-head']);
+  });
+  it('a type change checks the heights as new; a default height is reported on `type`', () => {
+    const plan = withDoorHead(1500);                                             // below the 1800 door minimum
+    ok([{ op: 'update_opening', openingId: 'd1', name: 'x' }], plan);
+    expect(err([{ op: 'change_opening_type', openingId: 'd1', type: 'hole', head: 1500 }], plan)).toEqual([0, 'commands[0].head', 'height-out-of-range']);
+    const low = base(); low.ceilingHeight = 2000;                                // the default window head 2400 is above it
+    expect(err([{ op: 'add_opening', type: 'window', wallId: 'w2', offset: 500, width: 800 }], low)).toEqual([0, 'commands[0].type', 'height-out-of-range']);
+  });
+  it('overlap: an existing pair can stay or shrink, not grow; a new pair is refused, on wallId after a move to another wall', () => {
+    const plan = base(); plan.openings.push({ id: 'win2', type: 'window', wallId: 'w1', offset: 2000, width: 600, sill: 900, head: 2400 }); // 200 into `win`
+    expect(validatePlan(plan, 'saved').warnings.map(w => w.code)).toEqual(['openings-overlap']);
+    ok([{ op: 'update_opening', openingId: 'win2', name: 'x' }], plan);
+    ok([{ op: 'move_opening', openingId: 'win2', offset: 2100 }], plan);
+    ok([{ op: 'resize_opening', openingId: 'win2', width: 500 }], plan);
+    expect(err([{ op: 'move_opening', openingId: 'win2', offset: 1900 }], plan)).toEqual([0, 'commands[0].offset', 'openings-overlap']);
+    expect(err([{ op: 'move_opening', openingId: 'win2', offset: 2100 }, { op: 'move_opening', openingId: 'win2', offset: 2050 }], plan)).toEqual([1, 'commands[1].offset', 'openings-overlap']);
+    expect(err([{ op: 'move_opening', openingId: 'win2', offset: 2500 }], plan)).toEqual([0, 'commands[0].offset', 'openings-overlap']); // 100 into the door
+    const two = base(); two.openings.push({ id: 'd2', type: 'door', wallId: 'w2', offset: 1000, width: 900, hinge: 'start', swing: 'left', head: 2100 });
+    expect(err([{ op: 'move_opening', openingId: 'd1', wallId: 'w2', offset: 1500 }], two)).toEqual([0, 'commands[0].wallId', 'openings-overlap']);
+  });
+  it('a window in a low wall: kept by edits in place; a move into a low wall or a type change to window there is refused', () => {
+    const plan = base(); plan.openings.push({ id: 'lw', type: 'window', wallId: 'w3', offset: 1000, width: 800, sill: 0, head: 900 },
+      { id: 'd3', type: 'door', wallId: 'w3', offset: 3000, width: 900, hinge: 'start', swing: 'left', head: 2100 });
+    expect(validatePlan(plan, 'saved').warnings.map(w => w.code)).toEqual(['window-in-low-wall']);
+    ok([{ op: 'update_opening', openingId: 'lw', name: 'x' }, { op: 'resize_opening', openingId: 'lw', width: 700 }, { op: 'move_opening', openingId: 'lw', offset: 1200 }], plan);
+    expect(err([{ op: 'move_opening', openingId: 'win', wallId: 'w3', offset: 4500 }], plan)).toEqual([0, 'commands[0].wallId', 'window-in-low-wall']);
+    expect(err([{ op: 'change_opening_type', openingId: 'd3', type: 'window', sill: 0, head: 900 }], plan)).toEqual([0, 'commands[0].type', 'window-in-low-wall']);
+  });
+  it('rooms: an outline that crosses itself or a missing material stays for other edits; a new outline or material must be valid; a small area can grow, not shrink', () => {
+    const crossing = base(); crossing.rooms[0].poly = [[100, 100], [5940, 3940], [5940, 100], [100, 3940]];
+    ok([{ op: 'update_room', roomId: 'r1', name: 'x' }], crossing);
+    expect(err([{ op: 'update_room', roomId: 'r1', poly: [[100, 100], [3000, 3940], [3000, 100], [100, 3940]] }], crossing)).toEqual([0, 'commands[0].poly', 'room-self-crossing']);
+    ok([{ op: 'update_room', roomId: 'r1', poly: [[100, 100], [5940, 100], [5940, 3940], [100, 3940]] }], crossing);
+    const missing = base(); missing.rooms[0].mat = 'stone';
+    ok([{ op: 'update_room', roomId: 'r1', name: 'x' }], missing);
+    expect(err([{ op: 'update_room', roomId: 'r1', mat: 'marble' }], missing)).toEqual([0, 'commands[0].mat', 'room-material-missing']);
+    const small = base(); small.rooms[0].poly = [[100, 100], [150, 100], [150, 150], [100, 150]];   // 50 × 50 mm, under the 100 × 100 minimum
+    ok([{ op: 'update_room', roomId: 'r1', name: 'x' }], small);
+    ok([{ op: 'update_room', roomId: 'r1', poly: [[100, 100], [180, 100], [180, 180], [100, 180]] }], small);
+    expect(err([{ op: 'update_room', roomId: 'r1', poly: [[100, 100], [140, 100], [140, 140], [100, 140]] }], small)).toEqual([0, 'commands[0].poly', 'room-area-too-small']);
+  });
+  it('set_ceiling_height: a head already above the ceiling does not block a ceiling that comes closer to it; a lower one is refused', () => {
+    const plan = withDoorHead(2900);                                             // 100 above the 2800 ceiling
+    expect(ok([{ op: 'set_ceiling_height', ceilingHeight: 2850 }], plan).plan.ceilingHeight).toBe(2850);
+    expect(ok([{ op: 'set_ceiling_height', ceilingHeight: 3000 }], plan).warnings).toEqual([]);
+    expect(refused([{ op: 'set_ceiling_height', ceilingHeight: 2750 }], plan)).toMatchObject({ path: 'commands[0].ceilingHeight', code: 'opening-head-above-ceiling', params: { openingId: 'd1', head: 2900 } });
+    // The window head 2400 was below the ceiling, so a ceiling under it is new and refused.
+    expect(refused([{ op: 'set_ceiling_height', ceilingHeight: 2300 }], plan)).toMatchObject({ code: 'opening-head-above-ceiling', params: { openingId: 'win', head: 2400 } });
+  });
+  it('new items stay strict', () => {
+    expect(err([{ op: 'add_opening', type: 'door', wallId: 'w2', offset: 500, width: 800, hinge: 'start', swing: 'left', head: 2900 }], base())).toEqual([0, 'commands[0].head', 'height-out-of-range']);
+    expect(err([{ op: 'add_room', name: 'x', mat: 'stone', poly: [[0, 0], [1000, 0], [1000, 1000], [0, 1000]] }], base())).toEqual([0, 'commands[0].mat', 'room-material-missing']);
+  });
+});

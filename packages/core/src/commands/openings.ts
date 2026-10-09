@@ -1,7 +1,7 @@
 import type { OpeningV2, PlanV2 } from '../types.js';
 import { DEFAULT_HEIGHTS, OPENING_TYPES } from '../validate.js';
 import type { OpeningCommand } from './types.js';
-import { checkHeights, checkOpening, cleanLength, findOpening, findWall, newId, readFields, refuse, replaceOpening, type FieldSpec, type Spec, type Step } from './support.js';
+import { causeIn, checkHeights, checkOpening, cleanLength, findOpening, findWall, newId, readFields, refuse, replaceOpening, type FieldSpec, type Spec, type Step } from './support.js';
 
 const openingType = { enum: OPENING_TYPES };
 const hinge = { enum: ['start', 'end'] as const }, swing = { enum: ['left', 'right'] as const };
@@ -39,7 +39,8 @@ function addOpening(plan: PlanV2, c: Extract<OpeningCommand, { op: 'add_opening'
   const opening: OpeningV2 = c.type === 'window' ? { ...base, type: 'window', sill: c.sill ?? DEFAULT_HEIGHTS.windowSill, head: c.head ?? DEFAULT_HEIGHTS.windowHead }
     : c.type === 'door' ? { ...base, type: 'door', hinge: c.hinge, swing: c.swing, head: c.head ?? DEFAULT_HEIGHTS.head, ...(c.entry !== undefined ? { entry: c.entry } : {}) }
     : { ...base, type: c.type, head: c.head ?? DEFAULT_HEIGHTS.head };
-  checkOpening(plan, opening, wall, 'offset');
+  // A height that was left out gets its default; an issue with it is reported on `type`, the field that chose the default.
+  checkOpening(plan, opening, wall, null, causeIn(c, 'offset', ['type']));
   return { plan: { ...plan, openings: [...plan.openings, opening] }, notes };
 }
 
@@ -52,7 +53,7 @@ function updateOpening(plan: PlanV2, c: Extract<OpeningCommand, { op: 'update_op
   checkTypeFields(c, opening.type);
   const { op: _op, openingId: _id, ...changes } = c;
   const next = { ...opening, ...changes } as OpeningV2;
-  checkHeights(next, plan.ceilingHeight);
+  checkHeights(next, plan.ceilingHeight, opening, causeIn(c, 'openingId', ['head', 'sill']));
   return { plan: replaceOpening(plan, next) };
 }
 
@@ -66,7 +67,8 @@ function moveOpening(plan: PlanV2, c: Extract<OpeningCommand, { op: 'move_openin
   readFields(c, { required: { openingId: 'id', offset: 'number' }, optional: { wallId: 'id' } });
   const opening = findOpening(plan, c.openingId), wall = findWall(plan, c.wallId ?? opening.wallId);
   const next = { ...opening, wallId: wall.id, offset: c.offset };
-  checkOpening(plan, next, wall, 'offset');
+  // A move to another wall is reported on `wallId`, the field that changed the wall.
+  checkOpening(plan, next, wall, opening, causeIn(c, wall.id !== opening.wallId ? 'wallId' : 'offset', []));
   return { plan: replaceOpening(plan, next) };
 }
 
@@ -76,7 +78,7 @@ function resizeOpening(plan: PlanV2, c: Extract<OpeningCommand, { op: 'resize_op
   // `keep: 'end'` keeps the end edge in place, so the start moves by the change in width.
   const offset = c.keep === 'end' ? cleanLength(opening.offset + opening.width - c.width) : opening.offset;
   const next = { ...opening, offset, width: c.width };
-  checkOpening(plan, next, wall, 'width');
+  checkOpening(plan, next, wall, opening, causeIn(c, 'width', []));
   return { plan: replaceOpening(plan, next) };
 }
 
@@ -90,7 +92,7 @@ function changeOpeningType(plan: PlanV2, c: Extract<OpeningCommand, { op: 'chang
   // Only the fields of the new type are kept: the old type's sill, hinge, swing and entry are removed.
   const { op: _op, openingId: _id, ...given } = c;
   const next = { id: opening.id, wallId: opening.wallId, offset: opening.offset, width: opening.width, ...(opening.name !== undefined ? { name: opening.name } : {}), ...given } as OpeningV2;
-  checkOpening(plan, next, wall, 'type');
+  checkOpening(plan, next, wall, opening, causeIn(c, 'type', ['type']));
   return { plan: replaceOpening(plan, next) };
 }
 

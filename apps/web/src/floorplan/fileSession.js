@@ -8,7 +8,6 @@ export function fileModeToken() {
 }
 
 const randomId = prefix => `${prefix}-${crypto.getRandomValues(new Uint32Array(3)).join('')}`;
-const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
 /** Reads the file state once, before the editor starts. Throws an Error with a zh-TW message if the server cannot be reached. */
 export async function openFileSession(token) {
@@ -191,6 +190,5 @@ export function createFileSync(session, editor, onChange) {
       const r = await fetch(`/api/backups/${newest.name}`, { headers: headers(false) }).then(x => x.json()).catch(() => null);
       return r?.ok ? { plan: r.state.plan, warnings: r.state.warnings } : null;
     },
-    same,
   };
 }

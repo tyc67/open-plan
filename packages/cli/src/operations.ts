@@ -220,7 +220,7 @@ const HEX64 = /^[0-9a-f]{64}$/;
 const revisionRequired = (what: string) => ({ ok: false as const, code: 'REVISION_REQUIRED', message: `expectedRevision is required ${what}: the revision from \`info\` or \`validate\` (64 hex characters).`, notices: [] as string[] });
 const conflict = (currentRevision: string | null) => ({
   ok: false as const, code: 'REVISION_CONFLICT', currentRevision, notices: [] as string[],
-  message: currentRevision === null ? 'The file of expectedRevision no longer exists. Nothing was created; read the folder again.' : 'The plan changed since expectedRevision. Read it again, then send the change with the new revision.',
+  message: currentRevision === null ? 'There is no file at this path. If you read it before, it was deleted after that; otherwise check the path. Nothing was created.' : 'The plan changed since expectedRevision. Read it again, then send the change with the new revision.',
 });
 
 /**
@@ -265,7 +265,10 @@ export async function applyBatch(file: string, request: { expectedRevision?: unk
   if (typeof request.expectedRevision !== 'string' || !HEX64.test(request.expectedRevision)) return { ok: false, code: 'REVISION_REQUIRED', message: 'expectedRevision is required: the revision from `info` or `validate` (64 hex characters).', notices: [] };
   if (!Array.isArray(request.commands)) return { ok: false, code: 'COMMANDS_INVALID', message: '`commands` must be a list.', notices: [] };
   const expected = request.expectedRevision, commands = request.commands;
-  return lockedPlan(file, true, async plan => {
+  return lockedPlan(file, false, async (plan, present) => {
+    // The caller read a file that is gone now (deleted after the read): a conflict with no current revision, as in
+    // write_plan and migrate_plan. Nothing is created.
+    if (!present) return conflict(null);
     const bytes = await readPlanBytes(plan, opts), revision = revisionOf(bytes);
     if (revision !== expected) return { ok: false, code: 'REVISION_CONFLICT', message: 'The plan changed since expectedRevision. Read it again, then send the commands with the new revision.', currentRevision: revision, notices: [] };
     const input = parseJson(bytes, plan);

@@ -17,7 +17,7 @@ The tools work on plan files in the **workspace**: the folder that the server wa
 
 **Results:** each result is one JSON object, as structured content and as the same JSON text. It has `ok`. When `ok` is `false`, the tool result is an error, and the object has a `code` and a `message`, and for validation problems an `errors` list. `render_preview` also gives the image.
 
-**Revision:** the `revision` is the SHA-256 of the raw bytes of the plan file, as 64 hex characters. Any change to the bytes changes it, also a change of formatting. `read_plan`, `plan_info`, `validate_plan` (for a file) and `render_preview` give it. If you give an `expectedRevision` and the file no longer exists (it was deleted after you read it), the result is `REVISION_CONFLICT` with `currentRevision: null`, and nothing is created.
+**Revision:** the `revision` is the SHA-256 of the raw bytes of the plan file, as 64 hex characters. Any change to the bytes changes it, also a change of formatting. `read_plan`, `plan_info`, `validate_plan` (for a file) and `render_preview` give it. If you give an `expectedRevision` and there is no file at the path (it was deleted after you read it, or the path is wrong), the result is `REVISION_CONFLICT` with `currentRevision: null`, and nothing is created.
 
 **Backups:** a tool that replaces a plan file first copies the current file to the folder `plan.json.backups` next to it. The 20 newest backups are kept. If a backup cannot be written, nothing is written. A new file has no previous file, so it has no backup. A write that does not change the plan writes nothing, and the revision stays the same.
 

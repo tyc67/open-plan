@@ -8,3 +8,4 @@ dist/
 /reference/
 /tools/visual/out/
 .pnpm-store/
+packages/cli/.test-run.lock

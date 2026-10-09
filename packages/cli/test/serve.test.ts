@@ -349,6 +349,17 @@ describe('security', () => {
     expect((await api(server, '/api/plan', { token: 'x'.repeat(64) })).status).toBe(401);
     expect((await api(server, '/api/plan', { token: 'short' })).status).toBe(401);
     expect((await api(server, '/api/events', { token: null })).status).toBe(401);
+    // Every API route checks the token before it reads a body or a file; nothing changes without it.
+    const before = read(server.plan);
+    for (const [path, method, body] of [['/api/plan', 'PUT', {}], ['/api/load-file', 'POST', {}], ['/api/browser-backups', 'POST', { label: 'replaced', plan: {} }],
+      ['/api/backups', 'GET', undefined], ['/api/backups/x.json', 'GET', undefined]] as const) {
+      expect((await api(server, path, { method, body, token: null })).status, `${method} ${path}`).toBe(401);
+      expect((await api(server, path, { method, body, token: 'x'.repeat(64) })).status, `${method} ${path}`).toBe(401);
+    }
+    expect([read(server.plan), backupsOf(server.plan)]).toEqual([before, []]);
+    // A backup name that is not valid percent-encoding is 404, not a server error.
+    expect((await api(server, '/api/backups/%E0')).json).toMatchObject({ ok: false, code: 'BACKUP_NOT_FOUND' });
+    expect((await api(server, '/api/backups/%E0')).status).toBe(404);
     const index = await raw(server.port, { path: '/' });
     expect([index.status, index.text.includes('<div id="root">'), index.headers['content-type']]).toEqual([200, true, 'text/html; charset=utf-8']);
     expect(server.token).toMatch(/^[0-9a-f]{64}$/);

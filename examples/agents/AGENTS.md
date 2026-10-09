@@ -84,7 +84,7 @@ Add `--json` to any command for one JSON object on standard output. Each result 
 
 | Command | What it does |
 | --- | --- |
-| `<cli> guide` | Prints this guide. |
+| `<cli> guide [--form text\|agents-md\|skill\|llms\|mcp] [--cli <command>]` | Prints this guide, in one of its forms; `--cli` puts your CLI command in place of `<cli>` (not for the `mcp` form). |
 | `<cli> schema` | Prints the JSON Schema and the field description of the format. |
 | `<cli> new plan.json [--sample] [--replace]` | Writes an empty plan, or the sample apartment. An existing file is refused unless `--replace`; then it is backed up first. |
 | `<cli> validate plan.json` | Checks the plan with the strict rules: an issue that the editor only warns about is an error here. Gives the `revision`. |
@@ -94,18 +94,18 @@ Add `--json` to any command for one JSON object on standard output. Each result 
 | `<cli> migrate old.json plan.json [--replace]` | Converts a schema version 1 file to version 2, with a report. |
 | `<cli> backups plan.json` | Lists the backups of the plan. |
 | `<cli> restore plan.json <backup-name>` | Restores a backup. The current file is backed up first. |
-| `<cli> serve plan.json` | Opens the plan in the editor for the user (see below). |
+| `<cli> serve plan.json [--port n] [--host address] [--no-open]` | Opens the plan in the editor for the user (see below). |
 | `<cli> mcp [--root <folder>]` | Starts the Open Plan MCP server on standard input and output, for the MCP setup of an agent. Its tools work only on files in the root folder (default: the folder where it starts). |
 
-**Exit codes:** 0 success; 1 validation errors, refused commands or a refused file; 2 incorrect usage; 3 `REVISION_CONFLICT`; 4 the plan is locked; 5 a file or backup error.
+**Exit codes:** 0 success; 1 validation errors, refused commands, or an input that cannot be used (a missing file `FILE_NOT_FOUND`, a commands file that is not JSON `JSON_INVALID`, a refused file); 2 incorrect usage; 3 `REVISION_CONFLICT`; 4 the plan is locked; 5 a read, write or backup failure (`IO_ERROR`, `BACKUP_FAILED`).
 
-**Revision:** the `revision` is the SHA-256 of the raw bytes of the plan file, as 64 hex characters. Any change to the bytes changes it, also a change of formatting. `validate`, `info` and `render` give it.
+**Revision:** the `revision` is the SHA-256 of the raw bytes of the plan file, as 64 hex characters. Any change to the bytes changes it, also a change of formatting. `validate`, `info` and `render` give it. If there is no plan file at the path (it was deleted after you read it, or the path is wrong), `apply` gives `REVISION_CONFLICT` with `currentRevision: null` (exit code 3), and creates nothing.
 
 **Backups:** each command that writes the plan (`apply`, `new --replace`, `migrate --replace`, `restore`) first copies the current file to the folder `plan.json.backups` next to it. The 20 newest backups are kept. If a backup cannot be written, the command writes nothing. `apply` writes nothing, and makes no backup, when the commands do not change the plan.
 
 **Lock:** while a command writes, the file `plan.json.lock` exists, and other writers wait. Do not remove it unless an error tells you to.
 
-**`serve`:** `<cli> serve plan.json` starts the editor for the user on `http://127.0.0.1:5190` (or the next free port) and prints a link with a secret token; do not share it. It runs until Ctrl+C. The editor shows each change to the file at once, also changes from `apply`. The user's edits in the editor are saved to the file, so read the revision again before you send commands. Start it only when the user asks; it keeps running.
+**`serve`:** `<cli> serve plan.json` starts the editor for the user on `http://127.0.0.1:5190` (or the next free port) and prints a link with a secret token; do not share it. It runs until Ctrl+C. `--port` chooses the port (it must be free); `--no-open` does not open a browser; `--host` also accepts connections on one more address, for example the computer's LAN address (plain HTTP, so only on a network that you trust; a wildcard such as `0.0.0.0` is refused). The editor shows each change to the file at once, also changes from `apply`. The user's edits in the editor are saved to the file, so read the revision again before you send commands. Start it only when the user asks; it keeps running.
 
 **Editing the file directly:** you can write the plan file yourself (for the first version from an image). Then run `validate`. For changes to an existing plan, use `apply`: it checks the revision, so it does not write over a change that the user made in the editor.
 
@@ -186,7 +186,7 @@ A batch is a list of commands that changes a plan. Use a batch for every change 
 - An `update_` command refuses a field that another command changes (`field-not-updatable`, with the command to use), and an `id` (ids cannot change).
 - An id that does not exist is refused: `wall-missing`, `opening-missing`, `room-missing`, `furniture-missing`.
 - A new item can have an `id`; one that is already used is refused (`id-duplicate`). Without an `id`, one is generated, and the `id-generated` note gives it.
-- Commands do not make the problems that the validator rejects: a command that would make one is refused.
+- Commands do not make the problems that the validator rejects: a command that would make one is refused. A problem that the plan already has does not block a command that does not make it worse (see "A problem that the plan already has" under the opening rules).
 
 The examples below start from the example plan in "Open Plan format": wall `w1` from `[0, 100]` to `[8000, 100]`, the openings `win1`, `d1`, `s1` and `hole1` in it, the room `r1` and the material `wood`. Each example is the `commands` list of one batch.
 
@@ -337,7 +337,15 @@ Refused: `wall-not-demolishable` (only `n` and `low` walls can be demolished).
 - `update_opening` checks only the height rules, and `field-not-for-type` (a field that the opening type does not have, for example `sill` on a door).
 - `delete_opening` checks nothing more: it deletes any opening that exists.
 
-So an opening that breaks a placement rule can still be changed with `update_opening`, deleted, or moved to a place that keeps the rules. An opening in a demolished wall stays there (`toggle_demolition` does not remove it): `update_opening` and `delete_opening` work on it, `move_opening` can move it to a wall that is not demolished, and `resize_opening` and `change_opening_type` refuse it with `wall-demolished`.
+**A problem that the plan already has:** a saved plan can already have an opening that breaks one of these rules (an overlap, a window in a low wall, a height out of range). A command does not refuse a problem that it does not make worse:
+
+- An edit that does not touch the problem keeps it, for example a new `name`, or a move in the same wall that does not make an overlap longer.
+- A height or an overlap can be made smaller in steps, but not larger. Example: under a 2800 ceiling, a head of 2900 can change to 2850, but not to 3000.
+- A problem that the command makes is refused: a window moved into a low wall, a new overlap, or a type change to a window in a low wall. After a type change, the heights are checked as new.
+- Each command is compared with the plan just before it, also in a batch.
+- The error names the field that caused it, for example `wallId` for a move to another wall, or `type` for a default height that does not fit.
+
+So an opening with a problem can still be changed, deleted, or moved to a place that keeps the rules. An opening in a demolished wall stays there (`toggle_demolition` does not remove it): `update_opening` and `delete_opening` work on it, `move_opening` can move it to a wall that is not demolished, and `resize_opening` and `change_opening_type` refuse it with `wall-demolished`.
 
 ##### `add_opening`
 
@@ -446,7 +454,7 @@ Refused: `room-material-missing`, `room-too-few-points`, `room-self-crossing`, `
 Changes a room.
 
 - `roomId` (required).
-- `name`, `mat`, `poly`, `at`, `counted` (optional). The rules of `add_room` apply to the result.
+- `name`, `mat`, `poly`, `at`, `counted` (optional). The rules of `add_room` apply to the result, with one difference: a problem that the room already has stays if the command does not make it worse. A new `poly` must not cross itself, a new `mat` must exist, and an area below 0.01 m² can grow but not get smaller.
 
 ```json
 [{ "op": "update_room", "roomId": "r1", "name": "Living room" }]
@@ -534,9 +542,9 @@ Refused: `value-out-of-range` (a negative price).
 
 ##### `set_ceiling_height`
 
-- `ceilingHeight` (required): 2000 to 6000, and not below the head of any opening.
+- `ceilingHeight` (required): 2000 to 6000, and not below the head of any opening (except a head that is already above the ceiling, see below).
 
-Refused: `height-out-of-range`, `opening-head-above-ceiling` (lower that head first with `update_opening`).
+Refused: `height-out-of-range`, `opening-head-above-ceiling` (lower that head first with `update_opening`). A head that is already above the ceiling does not block a ceiling that comes closer to it; a ceiling that goes further below it is refused.
 
 ```json
 [{ "op": "set_ceiling_height", "ceilingHeight": 3000 }]

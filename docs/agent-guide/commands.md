@@ -23,7 +23,7 @@ A batch is a list of commands that changes a plan. Use a batch for every change 
 - An `update_` command refuses a field that another command changes (`field-not-updatable`, with the command to use), and an `id` (ids cannot change).
 - An id that does not exist is refused: `wall-missing`, `opening-missing`, `room-missing`, `furniture-missing`.
 - A new item can have an `id`; one that is already used is refused (`id-duplicate`). Without an `id`, one is generated, and the `id-generated` note gives it.
-- Commands do not make the problems that the validator rejects: a command that would make one is refused.
+- Commands do not make the problems that the validator rejects: a command that would make one is refused. A problem that the plan already has does not block a command that does not make it worse (see "A problem that the plan already has" under the opening rules).
 
 The examples below start from the example plan in "Open Plan format": wall `w1` from `[0, 100]` to `[8000, 100]`, the openings `win1`, `d1`, `s1` and `hole1` in it, the room `r1` and the material `wood`. Each example is the `commands` list of one batch.
 
@@ -174,7 +174,15 @@ Refused: `wall-not-demolishable` (only `n` and `low` walls can be demolished).
 - `update_opening` checks only the height rules, and `field-not-for-type` (a field that the opening type does not have, for example `sill` on a door).
 - `delete_opening` checks nothing more: it deletes any opening that exists.
 
-So an opening that breaks a placement rule can still be changed with `update_opening`, deleted, or moved to a place that keeps the rules. An opening in a demolished wall stays there (`toggle_demolition` does not remove it): `update_opening` and `delete_opening` work on it, `move_opening` can move it to a wall that is not demolished, and `resize_opening` and `change_opening_type` refuse it with `wall-demolished`.
+**A problem that the plan already has:** a saved plan can already have an opening that breaks one of these rules (an overlap, a window in a low wall, a height out of range). A command does not refuse a problem that it does not make worse:
+
+- An edit that does not touch the problem keeps it, for example a new `name`, or a move in the same wall that does not make an overlap longer.
+- A height or an overlap can be made smaller in steps, but not larger. Example: under a 2800 ceiling, a head of 2900 can change to 2850, but not to 3000.
+- A problem that the command makes is refused: a window moved into a low wall, a new overlap, or a type change to a window in a low wall. After a type change, the heights are checked as new.
+- Each command is compared with the plan just before it, also in a batch.
+- The error names the field that caused it, for example `wallId` for a move to another wall, or `type` for a default height that does not fit.
+
+So an opening with a problem can still be changed, deleted, or moved to a place that keeps the rules. An opening in a demolished wall stays there (`toggle_demolition` does not remove it): `update_opening` and `delete_opening` work on it, `move_opening` can move it to a wall that is not demolished, and `resize_opening` and `change_opening_type` refuse it with `wall-demolished`.
 
 #### `add_opening`
 
@@ -283,7 +291,7 @@ Refused: `room-material-missing`, `room-too-few-points`, `room-self-crossing`, `
 Changes a room.
 
 - `roomId` (required).
-- `name`, `mat`, `poly`, `at`, `counted` (optional). The rules of `add_room` apply to the result.
+- `name`, `mat`, `poly`, `at`, `counted` (optional). The rules of `add_room` apply to the result, with one difference: a problem that the room already has stays if the command does not make it worse. A new `poly` must not cross itself, a new `mat` must exist, and an area below 0.01 m² can grow but not get smaller.
 
 ```json
 [{ "op": "update_room", "roomId": "r1", "name": "Living room" }]
@@ -371,9 +379,9 @@ Refused: `value-out-of-range` (a negative price).
 
 #### `set_ceiling_height`
 
-- `ceilingHeight` (required): 2000 to 6000, and not below the head of any opening.
+- `ceilingHeight` (required): 2000 to 6000, and not below the head of any opening (except a head that is already above the ceiling, see below).
 
-Refused: `height-out-of-range`, `opening-head-above-ceiling` (lower that head first with `update_opening`).
+Refused: `height-out-of-range`, `opening-head-above-ceiling` (lower that head first with `update_opening`). A head that is already above the ceiling does not block a ceiling that comes closer to it; a ceiling that goes further below it is refused.
 
 ```json
 [{ "op": "set_ceiling_height", "ceilingHeight": 3000 }]

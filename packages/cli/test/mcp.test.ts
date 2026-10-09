@@ -65,6 +65,11 @@ describe('MCP: connection, tools, guide', () => {
     expect((await mcp.call('read_plan', { path: 'plan.json', extra: 1 })).result).toMatchObject({ ok: false, code: 'USAGE' });
     expect((await mcp.call('validate_plan', {})).result).toMatchObject({ ok: false, code: 'USAGE' });
     expect((await mcp.call('validate_plan', { path: 'plan.json', plan: {} })).result).toMatchObject({ ok: false, code: 'USAGE' });
+    // A revision that is not 64 hex characters is a bad argument, not a missing one.
+    for (const expectedRevision of ['abc', 'A'.repeat(64), '0'.repeat(63), '']) {
+      expect((await mcp.call('apply_commands', { path: 'plan.json', expectedRevision, commands: [] })).result, expectedRevision).toMatchObject({ ok: false, code: 'USAGE' });
+      expect((await mcp.call('write_plan', { path: 'plan.json', expectedRevision, plan: {} })).result, expectedRevision).toMatchObject({ ok: false, code: 'USAGE' });
+    }
     expect((await mcp.call('render_preview', { path: 'plan.json', crop: [1, 2, 3] })).isError).toBe(true);
     // Inherited property names, as they arrive from JSON: own keys "constructor", "__proto__", "toString".
     for (const json of ['{"constructor":1}', '{"__proto__":1}', '{"toString":1}', '{"path":"plan.json","hasOwnProperty":1}']) {
@@ -175,6 +180,9 @@ describe('MCP: create_plan and write_plan', () => {
     expect(read(join(dir, 'new.json'))).toBe(`${JSON.stringify(JSON.parse(read(join(dir, 'new.json'))), null, 2)}\n`);
     expect(run(dir, 'validate', 'new.json').code).toBe(0);
     expect((await mcp.call('write_plan', { path: 'gone.json', plan: examplePlan, expectedRevision: '1'.repeat(64) })).result).toMatchObject({ ok: false, code: 'REVISION_CONFLICT', currentRevision: null });
+    expect(existsSync(join(dir, 'gone.json'))).toBe(false);
+    // apply_commands has the same rule for a file that was deleted after it was read.
+    expect((await mcp.call('apply_commands', { path: 'gone.json', expectedRevision: '1'.repeat(64), commands: [{ op: 'set_plan_name', name: 'A' }] })).result).toMatchObject({ ok: false, code: 'REVISION_CONFLICT', currentRevision: null });
     expect(existsSync(join(dir, 'gone.json'))).toBe(false);
   });
   it('an existing file: no revision is DESTINATION_EXISTS, a stale one (an external edit) REVISION_CONFLICT; the right one replaces it after a backup', async () => {

@@ -40,11 +40,11 @@ function checkArgs(tool: Tool, args: Json) {
     const ok = field.kind === 'string' ? typeof value === 'string' && value !== ''
       : field.kind === 'boolean' ? typeof value === 'boolean'
       : field.kind === 'integer' ? Number.isInteger(value)
-      : field.kind === 'revision' ? typeof value === 'string'
+      : field.kind === 'revision' ? typeof value === 'string' && /^[0-9a-f]{64}$/.test(value)
       : field.kind === 'crop' ? Array.isArray(value) && value.length === 4 && value.every(n => typeof n === 'number')
       : field.kind === 'commands' ? Array.isArray(value)
       : true;
-    if (!ok) throw usage(`The argument "${key}" of ${tool.name} must be ${field.kind === 'crop' ? 'a list of four numbers' : field.kind === 'commands' ? 'a list' : `a ${field.kind}`}.`);
+    if (!ok) throw usage(`The argument "${key}" of ${tool.name} must be ${field.kind === 'crop' ? 'a list of four numbers' : field.kind === 'commands' ? 'a list' : field.kind === 'revision' ? 'a revision (64 hex characters, from read_plan, plan_info or validate_plan)' : `a ${field.kind}`}.`);
   }
 }
 
@@ -136,7 +136,7 @@ export function createTools(ws: Workspace, hooks: ToolHooks = {}) {
         plan: { kind: 'plan', required: true, description: 'The whole plan (schema version 2).' },
         expectedRevision: { kind: 'revision', description: 'Required to replace an existing file: its revision from read_plan, plan_info or validate_plan. Leave it out for a new file.' },
       },
-      description: 'Writes a whole plan, for example the first version from an image. The plan is checked with the strict rules first; a refusal writes nothing. A new file: give no expectedRevision (an existing file is refused). An existing file: expectedRevision is required, and the file is backed up before it is replaced. A plan that equals the current plan is not written.',
+      description: 'Writes a whole plan, for example the first version from an image. The plan is checked with the strict rules first; a refusal writes nothing. A new file: give no expectedRevision (an existing file is refused); a new file has no backup. An existing file: expectedRevision is required, and the file is backed up before it is replaced; if the file was deleted after you read it, the result is REVISION_CONFLICT with currentRevision null. A plan that equals the current plan is not written and makes no backup.',
       run: async args => {
         limit(jsonBytes(args.plan), MAX_PLAN_BYTES, 'The plan');
         const path = await ws.resolve(fileOf(args), false); await checked('write_plan', path);
@@ -150,12 +150,13 @@ export function createTools(ws: Workspace, hooks: ToolHooks = {}) {
         expectedRevision: { kind: 'revision', required: true, description: 'The revision of the plan that you read (read_plan, plan_info or validate_plan).' },
         commands: { kind: 'commands', required: true, description: `The commands, in order (see the "Commands" part of get_guide). At most ${MAX_COMMANDS} commands and ${MAX_COMMAND_BYTES} bytes.` },
       },
-      description: 'Changes a plan file with a batch of commands, for example { "op": "move_wall", ... }. The batch is atomic: if one command is refused, nothing is written (COMMANDS_REFUSED, with the index of the command). If the file changed since expectedRevision, nothing is written (REVISION_CONFLICT). The file is backed up before it is replaced. Get the 25 commands and their fields from get_guide.',
+      description: 'Changes a plan file with a batch of commands, for example { "op": "move_wall", ... }. The batch is atomic: if one command is refused, nothing is written (COMMANDS_REFUSED, with the index of the command). If the file changed since expectedRevision, nothing is written (REVISION_CONFLICT; currentRevision is null if the file no longer exists). The file is backed up before it is replaced; a batch that does not change the plan writes nothing and makes no backup. Get the 25 commands and their fields from get_guide.',
       run: async args => {
         const commands = args.commands as unknown[];
         if (commands.length > MAX_COMMANDS) throw new CliError('INPUT_TOO_LARGE', `The batch has ${commands.length} commands; the limit is ${MAX_COMMANDS}.`, { limit: MAX_COMMANDS, size: commands.length });
         limit(jsonBytes(commands), MAX_COMMAND_BYTES, 'The commands');
-        const path = await ws.resolve(fileOf(args), true); await checked('apply_commands', path);
+        // A missing file is not refused here: the operation gives REVISION_CONFLICT with currentRevision null.
+        const path = await ws.resolve(fileOf(args), false); await checked('apply_commands', path);
         return output(await op.applyBatch(path, { expectedRevision: args.expectedRevision, commands }, opts), '');
       },
     },
@@ -166,7 +167,7 @@ export function createTools(ws: Workspace, hooks: ToolHooks = {}) {
         destination: { kind: 'string', required: true, description: 'The version 2 file to write, relative to the workspace. It can be the source.' },
         expectedRevision: { kind: 'revision', description: 'Required to replace an existing destination (also the source itself): its revision. Leave it out for a new file.' },
       },
-      description: 'Converts a schema version 1 file to version 2, with a report of each change. A new destination: give no expectedRevision. An existing destination: its expectedRevision is required, and it is backed up before it is replaced.',
+      description: 'Converts a schema version 1 file to version 2, with a report of each change. A new destination: give no expectedRevision; a new file has no backup. An existing destination: its expectedRevision is required, and it is backed up before it is replaced.',
       run: async args => {
         const source = await ws.resolve(args.source as string, true), destination = await ws.resolve(args.destination as string, false);
         await checked('migrate_plan', source, destination);

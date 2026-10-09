@@ -19,8 +19,6 @@ export function stateOf(bytes: Buffer): FileState {
   return result.ok ? { revision, valid: true, plan: result.plan, warnings: result.warnings, errors: [] } : { revision, valid: false, warnings: result.warnings, errors: result.errors };
 }
 
-export const readState = async (path: string): Promise<FileState> => stateOf(await readBytes(path));
-
 const conflict = (state: FileState) => ({
   ok: false as const, code: 'REVISION_CONFLICT', message: 'The file changed since the revision that was sent.', currentRevision: state.revision, state, notices: [] as string[],
 });

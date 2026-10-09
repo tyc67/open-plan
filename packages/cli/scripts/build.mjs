@@ -29,6 +29,20 @@ const { metafile } = await build({
   bundle: true, platform: 'node', format: 'esm', target: 'node22', external: ['@resvg/resvg-js'],
   plugins: [raw], logLevel: 'warning', metafile: true,
 });
+// What is inside the bundle, from esbuild's list of inputs (roadmap C5a), so a new dependency cannot come in unseen:
+// only these npm packages, and from the MCP SDK only the stdio server, with no HTTP transport and no client.
+const BUNDLED = new Set(['@modelcontextprotocol/sdk', 'zod', 'zod-to-json-schema', 'ajv', 'ajv-formats', 'fast-deep-equal', 'fast-uri', 'json-schema-traverse']);
+const SDK_FORBIDDEN = /^dist\/(esm|cjs)\/(client\/|server\/(sse|streamableHttp|webStandardStreamableHttp|express|auth)|shared\/auth)/;
+const MAX_BUNDLE_BYTES = 1_000_000;   // a budget against unexpected growth (826,803 bytes on 2026-10-09), not a proof of content
+for (const input of Object.keys(metafile.inputs)) {
+  const at = input.lastIndexOf('node_modules/');
+  if (at < 0) continue;
+  const [, name, rest] = input.slice(at + 'node_modules/'.length).match(/^((?:@[^/]+\/)?[^/]+)\/(.*)$/);
+  if (!BUNDLED.has(name)) { console.error(`The bundle has an npm package that is not allowed: ${name} (${input}).`); process.exit(1); }
+  if (name === '@modelcontextprotocol/sdk' && SDK_FORBIDDEN.test(rest)) { console.error(`The bundle has an MCP SDK module that is not allowed (HTTP transport, auth or client): ${rest}.`); process.exit(1); }
+}
+const size = metafile.outputs[Object.keys(metafile.outputs).find(o => o.endsWith('cli.js'))].bytes;
+if (size > MAX_BUNDLE_BYTES) { console.error(`dist/cli.js is ${size} bytes, more than the budget of ${MAX_BUNDLE_BYTES}. Check what was added.`); process.exit(1); }
 // The npm packages inside the bundle (the MCP SDK and its dependencies, roadmap C5) keep their license texts:
 // dist/THIRD-PARTY-NOTICES.txt has each package's name, version and license file.
 const packages = new Map();

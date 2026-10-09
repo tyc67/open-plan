@@ -210,7 +210,12 @@ export async function startServer(options: ServeOptions): Promise<RunningServer>
       return reply(res, await backupBrowserPlan(plan, b.plan, 'replaced', lock));
     }
     if (path === '/api/backups' && method === 'GET') return json(res, 200, { ok: true, backups: await listBackups(plan) });
-    if (path.startsWith('/api/backups/') && method === 'GET') return reply(res, await readBackup(plan, decodeURIComponent(path.slice('/api/backups/'.length))));
+    if (path.startsWith('/api/backups/') && method === 'GET') {
+      // A name that is not valid percent-encoding cannot be a backup name.
+      let name: string;
+      try { name = decodeURIComponent(path.slice('/api/backups/'.length)); } catch { return refuse(res, 'BACKUP_NOT_FOUND', 'There is no backup with this name.'); }
+      return reply(res, await readBackup(plan, name));
+    }
     if (path === '/api/events' && method === 'GET') {
       res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-store' });
       // The first event is the current state, so a browser that reconnects cannot stay on an old plan.

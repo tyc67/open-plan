@@ -14,13 +14,22 @@ function findFurniture(plan: PlanV2, furnitureId: string): Furniture {
   return plan.furniture.find(f => f.id === furnitureId) ?? refuse('furnitureId', 'furniture-missing', { furnitureId });
 }
 
-/** The room rules that the validator only warns about; a command must not create them (roadmap C1). */
-function checkRoom(plan: PlanV2, room: Room) {
-  if (!Object.hasOwn(plan.materials, room.mat)) refuse('mat', 'room-material-missing', { mat: room.mat, use: ['set_material'] });
+/**
+ * The room rules that the validator only warns about (roadmap C1). A new room must keep them all. For a changed room,
+ * an existing issue that the command does not make worse is kept (see `checkOpening` in support.ts): a new material must
+ * exist, and a new outline must not cross itself; a small area can grow toward the minimum but not shrink.
+ */
+function checkRoom(plan: PlanV2, room: Room, before: Room | null) {
+  if (!Object.hasOwn(plan.materials, room.mat) && room.mat !== before?.mat) refuse('mat', 'room-material-missing', { mat: room.mat, use: ['set_material'] });
   if (room.poly.length < 3) refuse('poly', 'room-too-few-points', { count: room.poly.length });
-  if (polygonSelfCrossing(room.poly)) refuse('poly', 'room-self-crossing');
-  const area = polygonArea(room.poly);
-  if (area < ROOM_MIN_AREA) refuse('poly', 'room-area-too-small', { area: area / 1e6, min: ROOM_MIN_AREA / 1e6 });
+  const newOutline = !before || room.poly.length !== before.poly.length || room.poly.some((p, i) => p[0] !== before.poly[i][0] || p[1] !== before.poly[i][1]);
+  const crossing = polygonSelfCrossing(room.poly);
+  if (crossing && newOutline) refuse('poly', 'room-self-crossing');
+  if (crossing) return;
+  const gap = ROOM_MIN_AREA - polygonArea(room.poly);
+  // The gap before: none if the room is new, if its area was large enough, or if its outline crossed itself (no area).
+  const wasGap = before && before.poly.length >= 3 && !polygonSelfCrossing(before.poly) ? ROOM_MIN_AREA - polygonArea(before.poly) : 0;
+  if (gap > 0 && (wasGap <= 0 || gap > wasGap)) refuse('poly', 'room-area-too-small', { area: polygonArea(room.poly) / 1e6, min: ROOM_MIN_AREA / 1e6 });
 }
 function checkFurniture(f: Furniture) {
   for (const key of ['w', 'd'] as const) if (!(f[key] > 0)) refuse(key, 'size-not-positive', { value: f[key] });
@@ -33,7 +42,7 @@ function addRoom(plan: PlanV2, c: Extract<RoomCommand, { op: 'add_room' }>): Ste
   const room: Room = { id, name: c.name, mat: c.mat, poly: points(c.poly) };
   if (c.at !== undefined) room.at = [c.at[0], c.at[1]];
   if (c.counted !== undefined) room.counted = c.counted;
-  checkRoom(plan, room);
+  checkRoom(plan, room, null);
   return { plan: { ...plan, rooms: [...plan.rooms, room] }, notes };
 }
 
@@ -45,7 +54,7 @@ function updateRoom(plan: PlanV2, c: Extract<RoomCommand, { op: 'update_room' }>
   if (c.poly !== undefined) next.poly = points(c.poly);
   if (c.at !== undefined) next.at = [c.at[0], c.at[1]];
   if (c.counted !== undefined) next.counted = c.counted;
-  checkRoom(plan, next);
+  checkRoom(plan, next, room);
   return { plan: { ...plan, rooms: plan.rooms.map(r => r.id === room.id ? next : r) } };
 }
 

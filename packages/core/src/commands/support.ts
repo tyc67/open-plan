@@ -90,11 +90,69 @@ export function checkDemolishable(type: string, demolished: boolean | undefined,
 }
 
 /**
- * The rules for one opening in its wall, as a command must keep them (roadmap C1): inside the wall, no overlap with
- * the other openings of that wall, not in a demolished wall, no window in a low wall, heights in range. `field` is the
- * command field to name. Openings listed in `ignore` (the opening itself, or openings that move in the same step) are skipped.
+ * How a command treats the tolerable issues of the item it changes (roadmap C1, Step C follow-up). A saved plan can
+ * already have these issues, so an edit must not be refused for an issue that it does not make worse:
+ *
+ * - Unrelated edits keep the existing issues (a name change of a door whose head is above the ceiling is accepted).
+ * - A numeric violation can be repaired in part, but not made worse: the gap after the command must not be larger than
+ *   the gap just before it (a head 2900 → 2850 under a 2800 ceiling is accepted; 2900 → 3000 is refused).
+ * - A relationship that the command changes must satisfy its rule (a window moved into a low wall, a new room outline
+ *   that crosses itself, a new material that does not exist).
+ * - A new item has nothing before it, so all its rules are strict.
+ *
+ * "Before" is the state just before the command, so in a batch a later command cannot undo a repair of an earlier one.
+ * `cause` names the command field to report for an issue: the field that changed it.
  */
-export function checkOpening(plan: PlanV2, opening: OpeningV2, wall: WallV2, field: string, ignore: ReadonlySet<string> = new Set([opening.id])) {
+export type Cause = (key: 'sill' | 'head' | 'position') => string;
+
+/**
+ * The fields to report for one command: `position` for the rules of the place in the wall (and a low wall), and for a
+ * height rule the height field itself if the command has it, or else the first field in `heights` that the command has.
+ */
+export function causeIn(command: object, position: string, heights: string[]): Cause {
+  const has = (key: string) => (command as Record<string, unknown>)[key] !== undefined;
+  return key => key === 'position' ? position : has(key) ? key : heights.find(has) ?? key;
+}
+
+interface HeightIssue { rule: string; key: 'sill' | 'head'; code: string; params: Record<string, unknown>; gap: number }
+/** The height rules of the validator (roadmap A2), each with its gap: how far the value is outside the rule. */
+function heightIssues(o: OpeningV2, ceiling: number): HeightIssue[] {
+  const issues: HeightIssue[] = [];
+  if (o.type === 'window') {
+    if (o.sill < 0) issues.push({ rule: 'sill-min', key: 'sill', code: 'height-out-of-range', params: { min: 0, value: o.sill }, gap: -o.sill });
+    if (o.sill >= o.head) issues.push({ rule: 'sill-head', key: 'sill', code: 'window-sill-not-below-head', params: { sill: o.sill, head: o.head }, gap: o.sill - o.head });
+    if (o.head > ceiling) issues.push({ rule: 'head-max', key: 'head', code: 'height-out-of-range', params: { max: ceiling, value: o.head }, gap: o.head - ceiling });
+  } else {
+    if (o.head < HEAD_MIN) issues.push({ rule: 'head-min', key: 'head', code: 'height-out-of-range', params: { min: HEAD_MIN, max: ceiling, value: o.head }, gap: HEAD_MIN - o.head });
+    if (o.head > ceiling) issues.push({ rule: 'head-max', key: 'head', code: 'height-out-of-range', params: { min: HEAD_MIN, max: ceiling, value: o.head }, gap: o.head - ceiling });
+  }
+  return issues;
+}
+
+/**
+ * The height rules for an opening after a command. `before` is the opening just before the command (null: a new
+ * opening). A change of type changes which rules apply, so after a type change the heights are checked as new.
+ */
+export function checkHeights(opening: OpeningV2, ceiling: number, before: OpeningV2 | null, cause: Cause) {
+  const was = new Map(before && before.type === opening.type ? heightIssues(before, ceiling).map(i => [i.rule, i.gap]) : []);
+  for (const issue of heightIssues(opening, ceiling)) {
+    const gap = was.get(issue.rule);
+    if (gap === undefined || issue.gap > gap) refuse(cause(issue.key), issue.code, issue.params);
+  }
+}
+
+/** The length by which two openings in one wall overlap (0 or less: no overlap). */
+const overlap = (a: OpeningV2, b: OpeningV2) => Math.min(a.offset + a.width, b.offset + b.width) - Math.max(a.offset, b.offset);
+
+/**
+ * The rules for one opening in its wall, as a command must keep them (roadmap C1): inside the wall, no overlap with
+ * the other openings of that wall, not in a demolished wall, no window in a low wall, heights in range. `before` is the
+ * opening just before the command (null: a new opening); the tolerable rules follow the rules above. Openings listed in
+ * `ignore` (the opening itself, or openings that move in the same step) are skipped.
+ */
+export function checkOpening(plan: PlanV2, opening: OpeningV2, wall: WallV2, before: OpeningV2 | null, cause: Cause, ignore: ReadonlySet<string> = new Set([opening.id])) {
+  const field = cause('position'), sameWall = before?.wallId === wall.id;
+  // Not a tolerable issue but a command rule (roadmap C1): an opening in a demolished wall can only be renamed, deleted or moved out.
   if (wall.demolished) refuse(field, 'wall-demolished', { wallId: wall.id });
   if (opening.offset < 0) refuse(field, 'value-out-of-range', { min: 0, value: opening.offset });
   if (!(opening.width > 0)) refuse(field, 'size-not-positive', { value: opening.width });
@@ -102,18 +160,13 @@ export function checkOpening(plan: PlanV2, opening: OpeningV2, wall: WallV2, fie
   if (end > length + LENGTH_TOLERANCE) refuse(field, 'opening-outside-wall', { openingId: opening.id, wallLength: length, end });
   for (const other of openingsIn(plan, wall.id)) {
     if (ignore.has(other.id)) continue;
-    if (opening.offset < other.offset + other.width - LENGTH_TOLERANCE && other.offset < end - LENGTH_TOLERANCE) refuse(field, 'openings-overlap', { openingId: opening.id, otherId: other.id });
+    const now = overlap(opening, other);
+    if (now <= LENGTH_TOLERANCE) continue;
+    const was = sameWall ? overlap(before!, other) : 0;
+    if (was <= LENGTH_TOLERANCE || now > was + LENGTH_TOLERANCE) refuse(field, 'openings-overlap', { openingId: opening.id, otherId: other.id });
   }
-  if (opening.type === 'window' && wall.type === 'low') refuse(field, 'window-in-low-wall', { wallId: wall.id });
-  checkHeights(opening, plan.ceilingHeight);
-}
-
-export function checkHeights(opening: OpeningV2, ceiling: number) {
-  if (opening.type === 'window') {
-    if (opening.sill < 0) refuse('sill', 'height-out-of-range', { min: 0, value: opening.sill });
-    if (opening.sill >= opening.head) refuse('sill', 'window-sill-not-below-head', { sill: opening.sill, head: opening.head });
-    if (opening.head > ceiling) refuse('head', 'height-out-of-range', { max: ceiling, value: opening.head });
-  } else if (opening.head < HEAD_MIN || opening.head > ceiling) refuse('head', 'height-out-of-range', { min: HEAD_MIN, max: ceiling, value: opening.head });
+  if (opening.type === 'window' && wall.type === 'low' && !(sameWall && before!.type === 'window')) refuse(field, 'window-in-low-wall', { wallId: wall.id });
+  checkHeights(opening, plan.ceilingHeight, before, cause);
 }
 
 /**
