@@ -152,7 +152,7 @@ async function main(argv: string[]): Promise<number> {
 async function serve(file: string, values: { json?: boolean; port?: string; host?: string; 'no-open'?: boolean }, fail: (code: string, message: string) => number): Promise<number> {
   const port = values.port === undefined ? undefined : Number(values.port);
   if (port !== undefined && !(Number.isInteger(port) && port >= 1 && port <= 65535)) return fail('USAGE', '--port must be a whole number from 1 to 65535.');
-  const server = await startServer({ file, port, host: values.host, editorDir: fileURLToPath(new URL('./editor/', import.meta.url)) });
+  const server = await startServer({ file, port, host: values.host, editorDir: fileURLToPath(new URL('./editor/', import.meta.url)), onNotice: message => process.stderr.write(`${message}\n`) });
   if (values.json) process.stdout.write(`${JSON.stringify({ ok: true, url: server.url, port: server.port, plan: server.plan })}\n`);
   else process.stdout.write(`Open Plan is serving ${server.plan}\n${server.url}\nThe link has a secret token; do not share it. Stop with Ctrl+C.\n`);
   if (values.host) process.stderr.write(`Warning: also listening on ${values.host}. The connection is plain HTTP; use it only on a network you trust.\n`);

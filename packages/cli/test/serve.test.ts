@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { EventEmitter } from 'node:events';
 import { createServer, request } from 'node:http';
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { acquireLock, lockPath, releaseLock } from '../src/lock.js';
-import { startServer, type RunningServer } from '../src/serve.js';
+import { isWildcardAddress, startServer, type RunningServer } from '../src/serve.js';
 import { CLI, folder, read, run, V1_SAMPLE } from './helpers.js';
 
 const EDITOR = new URL('../dist/editor/', import.meta.url).pathname;
@@ -14,7 +15,7 @@ const running: RunningServer[] = [];
 afterEach(async () => { await Promise.all(running.splice(0).map(s => s.close())); });
 
 /** A folder with the sample plan and a server on a free port. */
-async function served(options: { pollMs?: number; testHooks?: { afterInitialRead?: () => Promise<void> } } = {}) {
+async function served(options: Partial<Parameters<typeof startServer>[0]> = {}) {
   const dir = folder(), plan = join(dir, 'plan.json');
   expect(run(dir, 'new', 'plan.json', '--sample').code).toBe(0);
   const server = await startServer({ file: plan, port: 0, editorDir: EDITOR, ...options });
@@ -102,7 +103,13 @@ describe('serve start-up (roadmap C3a)', () => {
     const bad = run(dir, 'serve', 'bad.json', '--no-open');
     expect([bad.code, bad.json.code, bad.json.errors[0].code]).toEqual([1, 'VALIDATION_FAILED', 'wall-zero-length']);
     expect(run(dir, 'serve', 'plan.json', '--no-open', '--host', '0.0.0.0')).toMatchObject({ code: 2, json: { code: 'USAGE' } });
+    // Node binds each of these to every address (0.0.0.0 or ::).
+    for (const host of ['0', '::0', '0:0:0:0:0:0:0:0']) expect(run(dir, 'serve', 'plan.json', '--no-open', '--host', host), host).toMatchObject({ code: 2, json: { code: 'USAGE' } });
     expect(run(dir, 'validate', 'plan.json', '--port', '1')).toMatchObject({ code: 2 });
+  });
+  it('a wildcard --host is found in every spelling; one address, also with an IPv6 zone or as a name, is not a wildcard', () => {
+    for (const host of ['', '*', '0', '0x0', '0.0', '000.000.000.000', '0.0.0.0', '::', '[::]', '::0', '0:0:0:0:0:0:0:0', '::0.0.0.0', '::ffff:0.0.0.0', '::ffff:0:0', '[::ffff:0:0]', '::%en0']) expect(isWildcardAddress(host), host).toBe(true);
+    for (const host of ['192.168.1.5', '10.0.0.1', '::1', '[::1]', 'fe80::1%en0', 'localhost', 'my-mac.local', '127.0.0.1']) expect(isWildcardAddress(host), host).toBe(false);
   });
   it('an explicit --port that is in use fails (exit 5); without --port, the next free port is used', async () => {
     const blocker = createServer(); await new Promise<void>(done => blocker.listen(0, '127.0.0.1', done));
@@ -255,6 +262,28 @@ describe('change events', () => {
     writeFileSync(join(dir, 'next.tmp'), JSON.stringify(renamed(JSON.parse(read(plan)), 'Renamed in')));
     renameSync(join(dir, 'next.tmp'), plan);
     expect((await tab.next(e => e.data.state.plan?.name === 'Renamed in')).data.state.revision).toBe(sha(readFileSync(plan)));
+    tab.close();
+  });
+  it('a folder-watcher error closes the watcher with a notice, and the 1 s check still finds each change', async () => {
+    const fake = Object.assign(new EventEmitter(), { closed: false, close() { this.closed = true; } });
+    const notices: string[] = [];
+    const { plan, server } = await served({ pollMs: 200, onNotice: m => notices.push(m), testHooks: { watch: (() => fake) as never } });
+    const tab = await events(server);
+    await tab.next();
+    fake.emit('error', Object.assign(new Error('watch failed'), { code: 'EPERM' }));
+    expect([fake.closed, notices.length, notices[0]]).toEqual([true, 1, expect.stringContaining('The folder watcher stopped (EPERM)')]);
+    writeFileSync(plan, JSON.stringify(renamed(JSON.parse(read(plan)), 'After the watcher error')));
+    expect((await tab.next(e => e.data.state.plan?.name === 'After the watcher error')).data.state.revision).toBe(sha(readFileSync(plan)));
+    tab.close();
+  });
+  it('a folder watcher that cannot start is reported, and the 1 s check finds each change', async () => {
+    const notices: string[] = [];
+    const { plan, server } = await served({ pollMs: 200, onNotice: m => notices.push(m), testHooks: { watch: (() => { throw Object.assign(new Error('no watch'), { code: 'ENOSYS' }); }) as never } });
+    expect(notices).toEqual([expect.stringContaining('The folder watcher could not start (ENOSYS)')]);
+    const tab = await events(server);
+    await tab.next();
+    writeFileSync(plan, JSON.stringify(renamed(JSON.parse(read(plan)), 'Without a watcher')));
+    expect((await tab.next(e => e.data.state.plan?.name === 'Without a watcher')).data.state.revision).toBe(sha(readFileSync(plan)));
     tab.close();
   });
   it('after a reconnect, the first event has the current state, so a missed change cannot leave the tab on an old plan', async () => {

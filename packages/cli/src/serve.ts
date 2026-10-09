@@ -38,8 +38,10 @@ export interface ServeOptions {
   /** The interval of the fallback file check, in ms. */
   pollMs?: number;
   lock?: LockOptions;
-  /** For tests only: runs after the first state of a new event stream is read, to force an ordering. */
-  testHooks?: { afterInitialRead?: () => Promise<void> };
+  /** Receives a message for the user when the server changes how it works, for example after a folder-watcher error. */
+  onNotice?: (message: string) => void;
+  /** For tests only: runs after the first state of a new event stream is read, to force an ordering; `watch` replaces fs.watch. */
+  testHooks?: { afterInitialRead?: () => Promise<void>; watch?: typeof watch };
 }
 export interface RunningServer { url: string; port: number; token: string; plan: string; close(): Promise<void> }
 
@@ -64,6 +66,19 @@ async function editorFiles(dir: string): Promise<Map<string, string>> {
   return new Map(names.map(path => [`/${relative(dir, path).split(sep).join('/')}`, path]));
 }
 
+/**
+ * Whether `address` means "every address" (a wildcard), in any spelling that Node accepts: `0`, `0x0`, `0.0`, `::0`,
+ * the long IPv6 form, an IPv4-mapped form and others. The WHATWG URL parser gives the normal form of an IP address; an
+ * IPv6 zone (`%en0`) is removed first, as the URL parser does not accept it.
+ */
+export function isWildcardAddress(address: string): boolean {
+  const bare = address.replace(/^\[|\]$/g, '').replace(/%.*$/, '');
+  if (bare === '' || bare === '*') return true;
+  let normal: string;
+  try { normal = new URL(`http://${bare.includes(':') ? `[${bare}]` : bare}/`).hostname; } catch { return false; }
+  return ['0.0.0.0', '[::]', '[::ffff:0:0]'].includes(normal);
+}
+
 function listen(server: Server, port: number, address: string): Promise<number> {
   return new Promise((done, fail) => {
     const failed = (error: Error) => { server.off('listening', ok); fail(error); };
@@ -75,7 +90,8 @@ function listen(server: Server, port: number, address: string): Promise<number> 
 
 export async function startServer(options: ServeOptions): Promise<RunningServer> {
   const { file, host, pollMs = 1000, lock } = options;
-  if (host !== undefined && ['', '0.0.0.0', '::', '[::]', '*'].includes(host)) throw new CliError('USAGE', '--host needs the one address to accept, for example the computer\'s LAN address, not a wildcard.');
+  const wildcard = () => new CliError('USAGE', '--host needs the one address to accept, for example the computer\'s LAN address, not a wildcard.');
+  if (host !== undefined && isWildcardAddress(host)) throw wildcard();
   const plan = await checkStart(file);
   const files = await editorFiles(options.editorDir);
   const token = randomBytes(32).toString('hex'), tokenBytes = Buffer.from(token);
@@ -104,8 +120,19 @@ export async function startServer(options: ServeOptions): Promise<RunningServer>
     const state = await currentState().catch(() => null);
     if (state && state.revision !== lastRevision) { lastRevision = state.revision; broadcast(state, ownWrites.get(state.revision) ?? null); }
   });
+  // The folder watcher shows a change at once; the 1 s check finds it without the watcher. If the watcher cannot start or
+  // fails later (for example, the folder is removed), it is closed and the 1 s check continues alone.
   let watcher: FSWatcher | null = null;
-  try { watcher = watch(dirname(plan), (_event, name) => { if (!name || name === basename(plan)) check(); }); } catch { /* the 1 s check still runs */ }
+  const watchFolder = options.testHooks?.watch ?? watch;
+  try {
+    watcher = watchFolder(dirname(plan), (_event, name) => { if (!name || name === basename(plan)) check(); });
+    watcher.on('error', error => {
+      watcher?.close(); watcher = null;
+      options.onNotice?.(`The folder watcher stopped (${(error as NodeJS.ErrnoException).code ?? error.message}). File changes are now found by the check every ${pollMs} ms.`);
+    });
+  } catch (error) {
+    options.onNotice?.(`The folder watcher could not start (${(error as NodeJS.ErrnoException).code ?? (error as Error).message}). File changes are found by the check every ${pollMs} ms.`);
+  }
   const poll = setInterval(check, pollMs);
 
   // ---- Requests ----
@@ -243,11 +270,20 @@ export async function startServer(options: ServeOptions): Promise<RunningServer>
     }
   }
   if (host) {
-    servers.push(createServer(handle));
+    // A name can resolve to a wildcard address, so the address that is actually bound is checked too. Until that check
+    // has passed, this server closes each connection without handling it.
+    let checked = false;
+    servers.push(createServer((req, res) => { if (checked) handle(req, res); else req.socket.destroy(); }));
     try { await listen(servers[1], port, host.replace(/^\[|\]$/g, '')); } catch (error) {
       servers[0].close(); clearInterval(poll); watcher?.close();
       throw new CliError('IO_ERROR', `Cannot listen on ${host}:${port} (${(error as NodeJS.ErrnoException).code}).`);
     }
+    if (isWildcardAddress((servers[1].address() as { address: string }).address)) {
+      for (const server of servers) server.close();
+      clearInterval(poll); watcher?.close();
+      throw wildcard();
+    }
+    checked = true;
   }
 
   return {
