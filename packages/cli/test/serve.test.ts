@@ -178,6 +178,23 @@ describe('browser writes', () => {
     expect(read(join(`${plan}.backups`, kept.json.backup))).toBe(external);
     expect((await put(server, kept.json.revision, s.plan, 'session-keep-001', id('request'), 'other')).status).toBe(400);
   });
+  it('mode checkpoint (plan scaling, D3): the revision check of an autosave, and a backup of the current file first, also after the session has written', async () => {
+    const { plan, server } = await served(), s = await state(server);
+    const first = await put(server, s.revision, renamed(s.plan, 'Autosaved'), 'session-scale-001');
+    const second = await put(server, first.json.revision, renamed(s.plan, 'Autosaved again'), 'session-scale-001');
+    expect([typeof first.json.backup, second.json.backup]).toEqual(['string', null]);       // a later autosave makes no backup
+    const beforeScale = read(plan);
+    const scaled = await put(server, second.json.revision, renamed(s.plan, 'Scaled'), 'session-scale-001', id('request'), 'checkpoint');
+    expect([scaled.status, typeof scaled.json.backup, read(join(`${plan}.backups`, scaled.json.backup))]).toEqual([200, 'string', beforeScale]);
+    // A stale revision is refused with no backup and no change.
+    const count = backupsOf(plan).length, current = read(plan);
+    const stale = await put(server, second.json.revision, renamed(s.plan, 'Stale'), 'session-scale-001', id('request'), 'checkpoint');
+    expect([stale.status, stale.json.code, backupsOf(plan).length, read(plan)]).toEqual([409, 'REVISION_CONFLICT', count, current]);
+    // A backup that cannot be written refuses the write.
+    renameSync(`${plan}.backups`, `${plan}.backups-moved`); writeFileSync(`${plan}.backups`, 'not a folder');
+    const failed = await put(server, scaled.json.revision, renamed(s.plan, 'No backup'), 'session-scale-001', id('request'), 'checkpoint');
+    expect([failed.status, failed.json.code, read(plan)]).toEqual([507, 'BACKUP_FAILED', current]);
+  });
   it('two tabs write with the same revision at once: one succeeds, the other gets 409', async () => {
     const { plan, server } = await served(), s = await state(server);
     const results = await Promise.all([put(server, s.revision, renamed(s.plan, 'tab 1'), 'session-tab1-001'), put(server, s.revision, renamed(s.plan, 'tab 2'), 'session-tab2-002')]);

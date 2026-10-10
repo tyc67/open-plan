@@ -9,6 +9,7 @@ import { formatLength } from '../floorplan/units.js';
 import { issueMessages } from '../floorplan/issueMessages.js';
 import FurnitureSymbol from '../floorplan/FurnitureSymbol.jsx';
 import { AgentPromptCard, DropOverlay, EmptyPlanActions, ImportDialog, useFileDrop } from './PlanImport.jsx';
+import { changeLabel } from '../floorplan/planScale.js';
 
 const LEFT_TABS = [['furniture',Sofa,'家具庫'],['plan',Grid2X2,'平面圖設定'],['materials',SwatchBook,'地板材質'],['system',Settings,'工作區設定']];
 const RIGHT_TABS = [['objects',Layers3,'圖層與物件'],['properties',SlidersHorizontal,'物件屬性'],['history',History,'歷史紀錄']];
@@ -34,6 +35,7 @@ function initialWorkspace() {
 }
 function area(poly) {return Math.abs(poly.reduce((sum,[x,y],i)=>{const [nx,ny]=poly[(i+1)%poly.length];return sum+x*ny-nx*y;},0))/2e6;}
 function describeChange(before,after) {
+  const label=changeLabel(before,after);if(label)return label;
   if(before.id!==after.id)return '取代平面圖';
   if(JSON.stringify(before.costEstimate)!==JSON.stringify(after.costEstimate))return '更新費用估算';
   for(const wall of after.walls){const old=before.walls.find(w=>w.id===wall.id);if(old&&!!old.demolished!==!!wall.demolished)return wall.demolished?'標記拆除牆體':'恢復牆體';}
@@ -53,7 +55,7 @@ function describeChange(before,after) {
   }
   return '編輯平面圖';
 }
-export default function WorkspaceShell({planActions,unit='mm',onUnit,doc,status,view,onView,tool,onTool,library,properties,costEstimate,selected,selectedRoom,selectedWall,selectionRequest,history,onSelect,onRestore,onRename,onSave,onExport,onUndo,onRedo,onRotate,onDuplicate,onDelete,onZoom,onFit,ratio,onRatio,scaleBar,wallSnap,onToggleWallSnap,layers,onToggleLayer,onToggleLayerLock,onClearMeasurements,onDeleteMeasurement,showDimensions,onToggleDimensions,children}) {
+export default function WorkspaceShell({planActions,unit='mm',onUnit,doc,status,view,onView,tool,onTool,library,properties,costEstimate,selected,selectedRoom,selectedWall,selectedMeasurement,onPropertiesShown,selectionRequest,history,onSelect,onRestore,onRename,onSave,onExport,onUndo,onRedo,onRotate,onDuplicate,onDelete,onZoom,onFit,ratio,onRatio,scaleBar,wallSnap,onToggleWallSnap,layers,onToggleLayer,onToggleLayerLock,onClearMeasurements,onDeleteMeasurement,showDimensions,onToggleDimensions,children}) {
   const root=useRef(null);
   // Import (roadmap B3): the header, the plan panel and the empty plan open the same file input; a file dropped
   // anywhere on the workspace is imported the same way.
@@ -98,12 +100,15 @@ export default function WorkspaceShell({planActions,unit='mm',onUnit,doc,status,
   function finishName(){const next=name.trim()||'未命名平面圖';setName(next);onRename(next);}
   const current=doc.furniture.find(f=>f.id===selected);
   useEffect(()=>{
-    if(!(selected||selectedRoom||selectedWall))return;
+    if(!(selected||selectedRoom||selectedWall||selectedMeasurement))return;
     // On a phone the panel is an overlay over the canvas; in 3D it would block the drag that follows a tap-to-select.
     if(window.innerWidth<768&&view==='3d')return;
     // At tablet width, keep the furniture library open: adding an item selects it, and closing the library would interrupt adding more.
     setWorkspace(w=>window.innerWidth>=768&&singlePanel()&&w.leftOpen&&w.leftTab==='furniture'?w:{...w,rightOpen:true,rightTab:'properties',...(singlePanel()?{leftOpen:false}:{})});
-  },[selected,selectedRoom,selectedWall,selectionRequest]);
+  },[selected,selectedRoom,selectedWall,selectedMeasurement,selectionRequest]);
+  // The properties panel stays mounted when it is hidden; the editor must know when the user can see it.
+  const propertiesShown=workspace.rightOpen&&workspace.rightTab==='properties';
+  useEffect(()=>{onPropertiesShown?.(propertiesShown);},[propertiesShown]);
   const toolbarActions=[['復原',Undo2,onUndo,!history.past.length],['重做',Redo2,onRedo,!history.future.length]];
   const counts=`${doc.rooms.length} 個空間 · ${doc.furniture.length} 件家具`;
   return <div ref={root} className={'workspace-root relative flex h-dvh min-h-0 w-full flex-col overflow-clip bg-[#f4f7fb] font-sans text-[#1b2840] antialiased dark:bg-[#101827] dark:text-[#e9eff9] '+(workspace.theme==='dark'?'dark':'')}>

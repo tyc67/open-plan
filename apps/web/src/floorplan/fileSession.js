@@ -40,6 +40,9 @@ export function createFileSync(session, editor, onChange) {
   const valid = session.state.valid;
   let baseRevision = session.state.revision, synced = valid ? JSON.stringify(session.state.plan) : null;
   let writing = false, again = false, stopped = false;
+  // A checkpoint is a change to the whole plan (such as plan scaling): the server backs up the file before that write.
+  // Counters, not a flag: a checkpoint asked for while a checkpoint write is in flight must get its own backup.
+  let checkpointsAsked = 0, checkpointsDone = 0;
   // A page that starts on an invalid file shows a fallback plan; an edit to it is an unsaved edit like any other.
   const fallback = valid ? null : JSON.stringify(editor.latest());
   // view.status: 'ok' | 'saving' | 'conflict' | 'invalid' | 'disconnected' | 'error'. Each change of view gets a new
@@ -60,17 +63,17 @@ export function createFileSync(session, editor, onChange) {
   async function save() {
     if (stopped || blocked()) return;
     if (writing) { again = true; return; }
-    if (!dirty()) return;
-    const plan = editor.latest(), requestId = randomId('request');
+    if (!dirty()) { checkpointsDone = checkpointsAsked; return; }
+    const plan = editor.latest(), requestId = randomId('request'), asked = checkpointsAsked, mode = asked > checkpointsDone ? 'checkpoint' : 'autosave';
     writing = true; again = false; ownRequests.add(requestId);
     show({ status: 'saving' });
     const mine = version;
     try {
-      const r = await send('/api/plan', 'PUT', { expectedRevision: baseRevision, plan, sessionId, requestId, mode: 'autosave' });
+      const r = await send('/api/plan', 'PUT', { expectedRevision: baseRevision, plan, sessionId, requestId, mode });
       // The write counts (the plan sent is now the file), but a newer state (a conflict, an invalid file, a lost
       // connection) that arrived while it was in flight stays shown. A failure is older than that state, so it too
       // changes nothing.
-      if (r.status === 200) accept(plan, r.body.revision);
+      if (r.status === 200) { accept(plan, r.body.revision); checkpointsDone = Math.max(checkpointsDone, asked); }
       if (version === mine) {
         if (r.status === 200) show({ status: 'ok', saved: true });
         else if (r.status === 409 && r.body.code === 'REVISION_CONFLICT') external(r.body.state, null, true);
@@ -104,7 +107,7 @@ export function createFileSync(session, editor, onChange) {
       if (r.status === 200) {
         // Edits made while the request was pending are not in the backup, so the file version must not replace them.
         if (JSON.stringify(editor.latest()) !== sent) { show({ status: 'conflict', state: r.body.state, failed: '等待時又有新的修改，所以沒有載入；送出時的版本已備份' }); return; }
-        editor.load(r.body.state.plan); accept(r.body.state.plan, r.body.state.revision); show({ status: 'ok', loaded: true, backup: r.body.backup }); return;
+        editor.load(r.body.state.plan); accept(r.body.state.plan, r.body.state.revision); checkpointsDone = checkpointsAsked; show({ status: 'ok', loaded: true, backup: r.body.backup }); return;
       }
       if (r.status === 409 && r.body.code === 'REVISION_CONFLICT') { show({ status: 'conflict', state: r.body.state, refreshed: true }); return; }
       if (r.status === 409 && r.body.code === 'FILE_INVALID') { show({ status: 'invalid', state: r.body.state }); return; }
@@ -115,11 +118,12 @@ export function createFileSync(session, editor, onChange) {
   /** 保留我的版本: writes the browser plan over the file version shown; the server backs that version up first. */
   async function keepMine() {
     if (view.status !== 'conflict') return;
-    const shown = view.state, plan = editor.settle(), requestId = randomId('request'), mine = version;
+    const shown = view.state, plan = editor.settle(), requestId = randomId('request'), mine = version, asked = checkpointsAsked;
     ownRequests.add(requestId);
     try {
       const r = await send('/api/plan', 'PUT', { expectedRevision: shown.revision, plan, sessionId, requestId, mode: 'keep-mine' });
-      if (r.status === 200) { accept(plan, r.body.revision); if (version === mine) { show({ status: 'ok', saved: true, kept: true }); save(); } return; }
+      // This write backed the file up first, so it also served the checkpoints asked for before it.
+      if (r.status === 200) { accept(plan, r.body.revision); checkpointsDone = Math.max(checkpointsDone, asked); if (version === mine) { show({ status: 'ok', saved: true, kept: true }); save(); } return; }
       if (version !== mine) return;
       if (r.status === 409 && r.body.code === 'REVISION_CONFLICT') { show({ status: 'conflict', state: r.body.state, refreshed: true }); return; }
       show({ status: 'conflict', state: shown, failed: r.body.message ?? r.body.code });
@@ -173,6 +177,8 @@ export function createFileSync(session, editor, onChange) {
 
   return {
     save, loadFile, keepMine, retry,
+    /** The next write backs up the file first (a change to the whole plan, such as plan scaling). */
+    checkpoint() { checkpointsAsked++; },
     /** Unsaved edits: the open plan differs from the file, or a write is in flight. */
     unsaved: () => dirty() || writing,
     stop() { stopped = true; controller?.abort(); },

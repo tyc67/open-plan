@@ -42,6 +42,59 @@ function start(initial, doc) {
 }
 
 describe('file session races', () => {
+  it('checkpoint: the next write has mode checkpoint; one in flight keeps its mode; after it, writes are autosaves again', async () => {
+    const { server, editor } = start(state('r0', 'Start'), { name: 'Start' });
+    await tick();
+    editor.doc = { name: 'Edit 1' }; sync.save(); await tick();
+    // A scaling during the write in flight: that write stays an autosave, and the next one is the checkpoint.
+    editor.doc = { name: 'Scaled' }; sync.checkpoint(); sync.save(); await tick();
+    const first = await server.answer('/api/plan', 200, { revision: 'r1' });
+    const second = await server.answer('/api/plan', 200, { revision: 'r2' });
+    editor.doc = { name: 'Edit 2' }; sync.save(); await tick();
+    const third = await server.answer('/api/plan', 200, { revision: 'r3' });
+    expect([first, second, third].map(c => [c.body.mode, c.body.plan.name, c.body.expectedRevision])).toEqual([['autosave', 'Edit 1', 'r0'], ['checkpoint', 'Scaled', 'r1'], ['autosave', 'Edit 2', 'r2']]);
+  });
+  it('checkpoint: a second checkpoint during a checkpoint write in flight gets its own checkpoint write', async () => {
+    const { server, editor } = start(state('r0', 'Start'), { name: 'Start' });
+    await tick();
+    editor.doc = { name: 'Scale 1' }; sync.checkpoint(); sync.save(); await tick();
+    editor.doc = { name: 'Scale 2' }; sync.checkpoint(); sync.save(); await tick();
+    const first = await server.answer('/api/plan', 200, { revision: 'r1' });
+    const second = await server.answer('/api/plan', 200, { revision: 'r2' });
+    editor.doc = { name: 'Edit' }; sync.save(); await tick();
+    const third = await server.answer('/api/plan', 200, { revision: 'r3' });
+    expect([first, second, third].map(c => [c.body.mode, c.body.plan.name])).toEqual([['checkpoint', 'Scale 1'], ['checkpoint', 'Scale 2'], ['autosave', 'Edit']]);
+  });
+  it('checkpoint: 載入檔案版本 drops the request, so the next edit is an autosave', async () => {
+    const { server, editor, view } = start(state('r0', 'Start'), { name: 'Start' });
+    await tick();
+    editor.doc = { name: 'Scaled' }; sync.checkpoint(); sync.save(); await tick();
+    await server.answer('/api/plan', 409, { code: 'REVISION_CONFLICT', state: state('r9', 'External') });
+    sync.loadFile(); await tick();
+    await server.answer('/api/load-file', 200, { state: state('r9', 'External'), backup: 'b.json' });
+    expect([view().status, editor.doc.name]).toEqual(['ok', 'External']);
+    editor.doc = { name: 'Edit after' }; sync.save(); await tick();
+    expect(server.pending('/api/plan')[0].body.mode).toBe('autosave');
+  });
+  it('checkpoint: a refused checkpoint write (409) is a conflict; 保留我的版本 (a write with a backup) serves the request; an undo before the write drops it', async () => {
+    const { server, editor, view } = start(state('r0', 'Start'), { name: 'Start' });
+    await tick();
+    editor.doc = { name: 'Scaled' }; sync.checkpoint(); sync.save(); await tick();
+    await server.answer('/api/plan', 409, { code: 'REVISION_CONFLICT', state: state('r9', 'External') });
+    expect([view().status, editor.doc.name]).toEqual(['conflict', 'Scaled']);
+    sync.keepMine(); await tick();
+    const kept = await server.answer('/api/plan', 200, { revision: 'r10', backup: 'b.json' });
+    editor.doc = { name: 'Edit after' }; sync.save(); await tick();
+    const next = await server.answer('/api/plan', 200, { revision: 'r11' });
+    expect([kept.body.mode, next.body.mode]).toEqual(['keep-mine', 'autosave']);
+    // The plan is back to the file's content before any write: nothing is written, and the request is dropped.
+    const other = start(state('r0', 'Start'), { name: 'Start' });
+    await tick();
+    sync.checkpoint(); sync.save(); await tick();
+    expect(other.server.pending('/api/plan')).toEqual([]);
+    other.editor.doc = { name: 'Later edit' }; sync.save(); await tick();
+    expect(other.server.pending('/api/plan')[0].body.mode).toBe('autosave');
+  });
   it('a page that started on an invalid file and was edited does not lose the edit when the file is repaired: it is a conflict', async () => {
     const { server, editor, view } = start(state('bad', null, false), { name: 'empty fallback' });
     await tick();

@@ -188,8 +188,10 @@ export async function startServer(options: ServeOptions): Promise<RunningServer>
       const b = await body(req), sessionId = field(b.sessionId, ID, 'sessionId'), requestId = field(b.requestId, ID, 'requestId');
       // keep-mine (保留我的版本) writes over a file version that the browser has not loaded, so it always backs it up.
       const mode = b.mode ?? 'autosave';
-      if (mode !== 'autosave' && mode !== 'keep-mine') throw new CliError('BAD_REQUEST', 'mode must be "autosave" or "keep-mine".');
-      const backupFirst = mode === 'keep-mine' || !sessionsBackedUp.has(sessionId);
+      if (mode !== 'autosave' && mode !== 'keep-mine' && mode !== 'checkpoint') throw new CliError('BAD_REQUEST', 'mode must be "autosave", "keep-mine" or "checkpoint".');
+      // "checkpoint": an autosave of a change to the whole plan (plan scaling, roadmap D3). It has the revision check
+      // of an autosave, and the current file is always backed up first, also after the first write of the session.
+      const backupFirst = mode !== 'autosave' || !sessionsBackedUp.has(sessionId);
       let written: string | null = null;
       try {
         const result = await writeBrowserPlan(plan, { expectedRevision: field(b.expectedRevision, HEX64, 'expectedRevision'), plan: b.plan, backupFirst,
