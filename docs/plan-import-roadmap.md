@@ -1,10 +1,10 @@
 # Plan import roadmap
 
-As of 2026-10-06. Status: **proposal, no code written**.
+First written on 2026-10-06 as a proposal, before any code. **Status on 2026-10-11: Steps A to D are closed (Steps C and D with accepted exceptions, see their status blocks); Step E is not started; nothing is published (no remote, no public package, see Decisions and open questions).** Each dated section is a record of its date: file locations and present-tense text in it describe that date, not today.
 
 ## Summary
 
-Open Plan shows only one hard-coded apartment. For public users, a plan must come from data that the user supplies. The proposal: the user gives a floor-plan image to **their own AI agent** (Claude, Codex, Gemini or other), the agent writes **Open Plan JSON**, and the user imports that file. The app validates the file, shows the image under the plan, and lets the user correct errors.
+When this proposal was written, Open Plan showed only one hard-coded apartment. For public users, a plan must come from data that the user supplies. The proposal: the user gives a floor-plan image to **their own AI agent** (Claude, Codex, Gemini or other), the agent writes **Open Plan JSON**, and the user imports that file. The app validates the file and lets the user correct errors. (The first proposal also showed the image under the plan; the user removed the background image from the scope on 2026-10-10, so the user compares the plan with the source drawing outside the app.)
 
 Open Plan is also **a tool for agents**. Agents with a shell (Claude Code, Codex, Gemini CLI, Cursor, OpenCode) work on a **plan file** with a local CLI and a local MCP server: they validate, draw and change the plan, and the browser shows the same file live (Step C).
 
@@ -27,7 +27,7 @@ Open Plan is also **a tool for agents**. Agents with a shell (Claude Code, Codex
 
 ## Repository structure
 
-A **pnpm monorepo**. The repo has no commits yet, so the move costs no history.
+A **pnpm monorepo**. (When this was decided, the repo had no commits, so the move cost no history.)
 
 ```
 open-plan/
@@ -52,6 +52,8 @@ open-plan/
 - **Package names:** the root becomes `open-plan-workspace` (private). The names of the packages that will be published stay open until a usable scope is chosen (see Decisions and open questions). Inside the workspace, temporary private names are used.
 
 ## Current blockers
+
+**This table is the state on 2026-10-06, before Step A.** Steps A to D were made to remove these blockers; the status block of each step says what is done. The files and line numbers below are from that date, and several of the files do not exist now.
 
 The seed data is only one part. These parts of the code also assume the reference apartment. Locations are `path:line` on 2026-10-06, relative to `apps/web/src/floorplan/` (before A0 the same files were in `src/floorplan/`).
 

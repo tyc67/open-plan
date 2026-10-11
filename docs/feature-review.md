@@ -2,6 +2,30 @@
 
 As of 2026-10-06.
 
+## State on 2026-10-11 (read this first)
+
+This review is from 2026-10-06, before Steps A to D of the roadmap. Its file names and line numbers are from that date; several of the files do not exist now (the plan model moved to `packages/core`). The table below gives the state of each finding that was not "Fixed" in the tracking table. **The state comes from a reading of the code on 2026-10-11. No finding was reproduced in a browser on that date.**
+
+| ID | State on 2026-10-11 | Basis |
+| --- | --- | --- |
+| L1 | Open | The cut level in 3D is local state (`FloorPlan3D.jsx`, `cutLevel`), not stored. |
+| L3 | Needs repro | Not checked again. |
+| L6 | Open in website mode | No save on `pagehide`, and no sync or conflict check between two tabs. File mode (`serve`, Step C) asks before the page closes with unsaved edits, and has a conflict message for a change of the file. |
+| L7 | Partly corrected | The English save and load messages are gone. The hint of the measure tool still takes the place of the status line. |
+| L8 | Open | `startMeasure` checks only the lock of the dimensions layer, not if the layer is shown. |
+| L9 | Open | `containsPoint` (now in `packages/core/src/rooms.ts`) is true on an edge. |
+| L10 | Corrected by Step A | An opening belongs to a wall (`wallId`), and the openings of a demolished wall are not in the drawing geometry. |
+| L11 | Open (design) | Room outlines do not change when a wall is demolished or deleted. Since D4 the user can change the outline. |
+| L12 | Open | A stored `#abc` colour is shown correctly, but a typed `#abc` is still refused. |
+| L13 | Open (design) | Not changed. |
+| L14 | Not checked | The cost dock was not read for this. |
+| L15 | Open | `three/viewer.js` has a `webglcontextlost` handler and no `webglcontextrestored` handler. |
+| L16 | Partly corrected | The heights: corrected by Step A. Lintels and sills come from the heights of each opening (`three/models.js`). The other part of the finding is open: the `bearing` option is still passed to the 3D model (`FloorPlan3D.jsx`, `three/viewer.js`), and a change of it builds the model again, but it does not change what is drawn. |
+| L17 | Open | The export file name is always `open-plan.json`. |
+| L18 | Open | The price field handles Enter with no IME check. |
+
+Later limits and open points (Steps A to D) are in `docs/plan-import-roadmap.md`, not here.
+
 ## Summary
 
 The review found **5 high-severity defects**, 4 medium and 14 low in the existing features. A later fix review found 1 more low finding (L19). L2, L4, L5 and L19 are fixed, so 11 low findings are open. **All 5 high and all 4 medium defects are fixed** (see the **Fix** line under each). Four more items are not confirmed defects: 3 design decisions and 1 that needs a browser repro.
