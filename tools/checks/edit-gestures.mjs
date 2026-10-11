@@ -154,24 +154,30 @@ try {
   check('end: a room can be selected and shows its handles', (await count('[data-room-handle]')) === 4);
   check('the plan is valid for the CLI', cli('validate', 'plan.json').status === 0);
 
-  // 7. At 1024 × 768 the canvas toolbar is wider than the canvas (D4 added 2 tool buttons). Its last buttons are
-  // reached with the scroll arrow of the toolbar, and they work.
+  // 7. At 1024 × 768 the canvas toolbar is wider than the canvas (D4 added 2 tool buttons). The 2 new tools are at the
+  // end, so every button from before D4 is visible with no scroll; the new tools are reached with the scroll arrow of
+  // the toolbar, and they work.
   { const small = await (await browser.newContext({ viewport: { width: 1024, height: 768 }, deviceScaleFactor: 1, reducedMotion: 'reduce' })).newPage();
     small.on('pageerror', e => errors.push(e.message));
     await small.goto(started.url); await small.waitForSelector('svg.plan-svg');
-    const toolbar = small.locator('[role="toolbar"][aria-label="畫布工具"]'), arrow = small.getByRole('button', { name: '向右捲動工具列' });
-    /** True when the centre of the button is inside the visible part of the toolbar. */
-    const visible = label => small.getByRole('button', { name: label, exact: true }).first().evaluate(b => { const r = b.getBoundingClientRect(), v = b.closest('[data-toolbar-scroll]').getBoundingClientRect(), x = (r.left + r.right) / 2; return x > v.left && x < v.right; });
-    const ratio = () => small.locator('[data-scale-ratio] select').first().evaluate(s => s.options[0].textContent);
-    check('1024 × 768: the toolbar has the scroll arrow, and 顯示整張平面圖 is outside the visible part', (await arrow.count()) === 1 && !(await visible('顯示整張平面圖')) && (await toolbar.count()) === 1);
-    check('1024 × 768: the tools of D4 are visible with no scroll', (await visible('新增牆')) && (await visible('新增空間')));
+    const arrow = small.getByRole('button', { name: '向右捲動工具列' });
+    /** True when the whole button is in the visible part of the toolbar, and not below a scroll arrow. */
+    const visible = label => small.getByRole('button', { name: label, exact: true }).first().evaluate(b => {
+      const r = b.getBoundingClientRect(), scroll = b.closest('[data-toolbar-scroll]'), v = scroll.getBoundingClientRect();
+      const arrows = [...scroll.parentElement.querySelectorAll(':scope > button')].map(a => a.getBoundingClientRect());
+      return r.left >= v.left && r.right <= v.right && arrows.every(a => r.right <= a.left || r.left >= a.right);
+    });
+    const all = async labels => { for (const label of labels) if (!(await visible(label))) return false; return true; };
+    const order = await small.locator('[data-toolbar-scroll] button').evaluateAll(buttons => buttons.map(b => b.getAttribute('aria-label')));
+    check('toolbar: the 2 tools of D4 come after the view controls', same(order.slice(-5), ['縮小', '放大', '顯示整張平面圖', '新增牆', '新增空間']), order.join(' | '));
+    check('1024 × 768: every button from before D4 is visible with no scroll', await all(['2D 平面圖', '3D 檢視', '選取物件', '瀏覽畫布', '測量距離（M）', '加入家具', '顯示尺寸', '復原', '重做', '縮小', '放大', '顯示整張平面圖']));
+    check('1024 × 768: the toolbar has the scroll arrow, and 新增空間 is outside the visible part', (await arrow.count()) === 1 && !(await visible('新增空間')));
     await arrow.click(); await sleep(400);
-    check('1024 × 768: after the scroll arrow, 放大 and 顯示整張平面圖 are visible', (await visible('放大')) && (await visible('顯示整張平面圖')));
-    const before = await ratio();
-    await small.getByRole('button', { name: '放大', exact: true }).first().click(); await sleep(300);
-    const zoomed = await ratio();
-    await small.getByRole('button', { name: '顯示整張平面圖', exact: true }).first().click(); await sleep(300);
-    check('1024 × 768: 放大 and 顯示整張平面圖 work there', zoomed !== before && (await ratio()) === before, `${before} → ${zoomed} → ${await ratio()}`);
+    check('1024 × 768: after the scroll arrow, 新增牆 and 新增空間 are visible', await all(['新增牆', '新增空間']));
+    await small.getByRole('button', { name: '新增空間', exact: true }).first().click();
+    const roomPanel = (await until(async () => (await small.locator('[data-add-room-panel]').count()) === 1, 2000)) >= 0;
+    await small.getByRole('button', { name: '新增牆', exact: true }).first().click();
+    check('1024 × 768: 新增空間 and 新增牆 work there (each opens its panel)', roomPanel && (await until(async () => (await small.locator('[data-add-wall-panel]').count()) === 1, 2000)) >= 0);
     await small.close(); }
 
   check('no page errors', errors.length === 0, errors.join(' | '));

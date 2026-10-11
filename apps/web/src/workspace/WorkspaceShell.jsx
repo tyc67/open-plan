@@ -113,6 +113,7 @@ export default function WorkspaceShell({planActions,unit='mm',onUnit,doc,status,
   // The properties panel stays mounted when it is hidden; the editor must know when the user can see it.
   const propertiesShown=workspace.rightOpen&&workspace.rightTab==='properties';
   useEffect(()=>{onPropertiesShown?.(propertiesShown);},[propertiesShown]);
+  const toolButton=([id,Icon,label])=><button type="button" key={id} data-tool={id} className={canvasButton+(tool===id?' bg-[#4d72e1] !text-white':'')} aria-label={label} aria-pressed={tool===id} onClick={()=>onTool(id)}><Icon className="size-4"/></button>;
   const toolbarActions=[['復原',Undo2,onUndo,!history.past.length],['重做',Redo2,onRedo,!history.future.length]];
   const counts=`${doc.rooms.length} 個空間 · ${doc.furniture.length} 件家具`;
   return <div ref={root} className={'workspace-root relative flex h-dvh min-h-0 w-full flex-col overflow-clip bg-[#f4f7fb] font-sans text-[#1b2840] antialiased dark:bg-[#101827] dark:text-[#e9eff9] '+(workspace.theme==='dark'?'dark':'')}>
@@ -150,7 +151,7 @@ export default function WorkspaceShell({planActions,unit='mm',onUnit,doc,status,
         <ScrollToolbar className="absolute left-3 top-3 z-20 max-w-[calc(100%_-_24px)] rounded-xl border border-[#d8e2ee] bg-white/95 p-1.5 shadow-sm dark:border-[#3b4d68] dark:bg-[#18243a]/95 max-sm:max-w-[calc(100%_-_76px)]" role="toolbar" aria-label="畫布工具">
           <div className="flex shrink-0 items-center gap-1" role="group" aria-label="畫布檢視模式">{[['2d',Grid2X2,'2D 平面圖'],['3d',Box,'3D 檢視']].map(([id,Icon,label])=><button key={id} type="button" className={canvasButton+(view===id?' bg-[#4d72e1] !text-white':'')} aria-label={label} aria-pressed={view===id} onClick={()=>onView(id)}><Icon className="size-4"/></button>)}</div>
           <span className="mx-1 h-5 border-l border-[#d8e2ee] dark:border-[#3b4d68]"/>
-          {view==='2d'&&[['select',MousePointer2,'選取物件'],['pan',Hand,'瀏覽畫布'],['measure',ScanLine,'測量距離（M）'],['wall',PenLine,'新增牆'],['room',SquarePlus,'新增空間']].map(([id,Icon,label])=><button type="button" key={id} data-tool={id} className={canvasButton+(tool===id?' bg-[#4d72e1] !text-white':'')} aria-label={label} aria-pressed={tool===id} onClick={()=>onTool(id)}><Icon className="size-4"/></button>)}
+          {view==='2d'&&[['select',MousePointer2,'選取物件'],['pan',Hand,'瀏覽畫布'],['measure',ScanLine,'測量距離（M）']].map(toolButton)}
           <button type="button" className={canvasButton} onClick={()=>openLeft('furniture')} aria-label="加入家具"><Sofa className="size-4"/></button>
           {view==='2d'&&<button type="button" className={canvasButton+(showDimensions?' bg-blue-50 text-blue-600 dark:bg-[#263b6a] dark:text-blue-200':'')} aria-label="顯示尺寸" aria-pressed={showDimensions} onClick={onToggleDimensions}><Ruler className="size-4"/></button>}
           <span className="mx-1 h-5 border-l border-[#d8e2ee] dark:border-[#3b4d68]"/>
@@ -162,6 +163,10 @@ export default function WorkspaceShell({planActions,unit='mm',onUnit,doc,status,
               <button type="button" className={canvasButton} onClick={()=>onZoom(1.25)} aria-label="放大"><ZoomIn className="size-4"/></button>
               <button type="button" className={canvasButton} onClick={onFit} aria-label="顯示整張平面圖"><Maximize2 className="size-4"/></button>
             </div>
+            {/* The tools that add to the plan come after the view controls, so the buttons from before them keep their
+                places, and stay visible with no scroll at 1024 px. */}
+            <span className="mx-1 h-5 border-l border-[#d8e2ee] dark:border-[#3b4d68]"/>
+            {[['wall',PenLine,'新增牆'],['room',SquarePlus,'新增空間']].map(toolButton)}
           </>}
           {current&&<div className="flex items-center max-sm:hidden">
             <span className="mx-1 h-5 border-l border-[#d8e2ee] dark:border-[#3b4d68]"/>
