@@ -411,7 +411,7 @@ describe('set_ceiling_height', () => {
 describe('scale_plan (roadmap D3)', () => {
   const multipleOfTenth = (v: number) => Math.abs(v * 10 - Math.round(v * 10)) < 1e-6;
   it('scales the D3 fields about the pivot and keeps the others', () => {
-    const plan = { ...base(), furniture: [{ id: 'f', type: 'sofa', name: 'S', cx: 3000, cy: 2000, w: 2000, d: 900, rot: 30 }],
+    const plan = { ...base(), rooms: base().rooms.map(r => ({ ...r, at: [3000, 2000] as [number, number] })), furniture: [{ id: 'f', type: 'sofa', name: 'S', cx: 3000, cy: 2000, w: 2000, d: 900, rot: 30 }],
       measurements: [{ id: 'm', a: { x: 0, y: 0 }, b: { x: 1000, y: 500 } }], dimensions: [{ horizontal: true, at: -500, start: 0, segments: [1000, 5000] }] };
     const result = ok([{ op: 'scale_plan', factor: 2, pivot: [0, 0] }], plan);
     const p = result.plan;
@@ -419,6 +419,7 @@ describe('scale_plan (roadmap D3)', () => {
     expect(opening(p, 'd1')).toEqual({ ...base().openings[1], offset: 6000, width: 1800 });
     expect(opening(p, 'win')).toMatchObject({ offset: 2000, width: 2400, sill: 900, head: 2400 });
     expect(p.rooms[0].poly).toEqual([[200, 200], [11880, 200], [11880, 7880], [200, 7880]]);
+    expect(p.rooms[0].at).toEqual([6000, 4000]);
     expect(p.furniture[0]).toEqual({ id: 'f', type: 'sofa', name: 'S', cx: 6000, cy: 4000, w: 2000, d: 900, rot: 30 });
     expect(p.measurements).toEqual([{ id: 'm', a: { x: 0, y: 0 }, b: { x: 2000, y: 1000 } }]);
     expect(p.dimensions).toEqual([{ horizontal: true, at: -1000, start: 0, segments: [2000, 10000] }]);
