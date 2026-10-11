@@ -11,7 +11,10 @@ import { AGENT_PROMPT } from './agentPrompt.js';
 import { LIB } from './furnitureLibrary.js';
 import CostEstimate from './CostEstimate.jsx';
 import SnapGuides from './SnapGuides.jsx';
-import WallProperties, { canToggleDemolition } from './WallProperties.jsx';
+import WallProperties, { AddWallPanel } from './WallProperties.jsx';
+import EditNotice from './EditNotice.jsx';
+import { newWallThickness, runEdit, snapWallPoint, wallEnd } from './planEdit.js';
+import { editMessages, editNoteLines } from './issueMessages.js';
 import FurnitureAppearance from './FurnitureAppearance.jsx';
 import FloorPatterns, { RoomPatterns, roomFloorFill } from './FloorPatterns.jsx';
 import FurnitureSymbol from './FurnitureSymbol.jsx';
@@ -61,6 +64,12 @@ export default function FloorPlanEditor({ fileSession = null }) {
   const scalingOpen=useRef(false);
   const [scaleSession,setScaleSession]=useState(0);
   const [propertiesShown,setPropertiesShown]=useState(false);
+  // The result of the last edit through the core commands (roadmap D4): the reasons of a refusal, or what the edit also
+  // did. It stays until the next edit, until the user closes it, or until the open plan is swapped.
+  const [editNotice,setEditNotice]=useState(null);
+  // The add-wall tool: the first point, and the pointer position as the second one.
+  const wallDraft=useRef(null),wallGesture=useRef(null);
+  const [wallPreview,setWallPreview]=useState(null);
   const [selectedWall,setSelectedWall]=useState(null);
   const [selectedRoom,setSelectedRoom]=useState(null);
   const [selectionRequest,setSelectionRequest]=useState(0);
@@ -90,6 +99,13 @@ export default function FloorPlanEditor({ fileSession = null }) {
     const gesture=measureGesture.current;
     measure.current=null;measureGesture.current=null;setMeasurePreview(null);setMeasurementSnap(null);
     if(gesture&&svg.current?.hasPointerCapture(gesture.pointerId))svg.current.releasePointerCapture(gesture.pointerId);
+    cancelWall();
+  }
+  // Drops the first point of the add-wall tool and a tap in progress.
+  function cancelWall(){
+    const tap=wallGesture.current;
+    wallDraft.current=null;wallGesture.current=null;setWallPreview(null);
+    if(tap&&svg.current?.hasPointerCapture(tap.pointerId))svg.current.releasePointerCapture(tap.pointerId);
   }
   useEffect(()=>{cancelMeasure();},[tool,view]);
   function measurementPoint(e){const snapped=snapMeasurement(point(e),doc,ratio*25.4/96,measure.current?.a,e.shiftKey);setMeasurementSnap(snapped);return snapped;}
@@ -132,8 +148,8 @@ export default function FloorPlanEditor({ fileSession = null }) {
     pan.current=null;
   });
   const wall=doc.walls.find(w=>w.id===selectedWall);
+  function wallDown(e,id){if(e.button===0&&tool==='select'&&!spaceHeld.current){e.stopPropagation();if(e.pointerType==='touch'){touchRoom.current={kind:'wall',id,pointerId:e.pointerId,x:e.clientX,y:e.clientY};svg.current.setPointerCapture(e.pointerId);}else selectWall(id);}}
   function selectWall(id){setSelected(null);setSelectedRoom(null);setSelectedMeasurement(null);setSelectedWall(id);if(id)setSelectionRequest(value=>value+1);}
-  function toggleDemolition(){if(wall&&canToggleDemolition(wall))commit({...doc,walls:doc.walls.map(w=>w.id===wall.id?{...w,demolished:!w.demolished}:w)});}
   const room=doc.rooms.find(r=>r.id===selectedRoom);
   function selectRoom(id){setSelectedWall(null);setSelectedMeasurement(null);setSelected(null);setSelectedRoom(id);if(id)setSelectionRequest(value=>value+1);}
   function patchRoom(values){if(values.name&&layers.locked.roomNames)return;if(room)commit({...doc,rooms:doc.rooms.map(r=>r.id===room.id?{...r,...values}:r)});}
@@ -160,7 +176,7 @@ export default function FloorPlanEditor({ fileSession = null }) {
     latest:()=>latestDoc.current,
     // A gesture, a 3D drag, a focused field or an open scaling: an external version would interrupt it, so it is a
     // conflict instead.
-    busy:()=>!!(scalingOpen.current||drag.current||pan.current||measureGesture.current||view3d.current?.isDragging?.()||(document.activeElement instanceof HTMLElement&&document.activeElement.matches('input,textarea,select'))),
+    busy:()=>!!(scalingOpen.current||wallDraft.current||wallGesture.current||drag.current||pan.current||measureGesture.current||view3d.current?.isDragging?.()||(document.activeElement instanceof HTMLElement&&document.activeElement.matches('input,textarea,select'))),
     settle:()=>settleEditor(),
     // A file version replaces the open plan without an undo step, and the undo history starts again.
     load:plan=>{swapPlanGeneration();cancelMeasure();setSnapGuides([]);setDoc(plan);latestDoc.current=plan;setHistory({past:[],future:[]});},
@@ -194,7 +210,7 @@ export default function FloorPlanEditor({ fileSession = null }) {
   // undo, redo), the move is dropped: the 3D view can release the pointer before it renders the new plan, and the plan
   // can have the same ID (a second restore) and the same item IDs (the sample).
   const planGeneration=useRef(0),view3d=useRef(null);
-  function swapPlanGeneration(){planGeneration.current++;view3d.current?.cancelDrag();setScaleSession(n=>n+1);}
+  function swapPlanGeneration(){planGeneration.current++;view3d.current?.cancelDrag();setScaleSession(n=>n+1);setEditNotice(null);cancelWall();}
   function moveFurniture(id,position,token) {
     if(layers.locked.furniture||token!==undefined&&token!==planGeneration.current)return;
     const furniture=doc.furniture.find(f=>f.id===id);
@@ -243,6 +259,7 @@ export default function FloorPlanEditor({ fileSession = null }) {
       measure.current={...measure.current,b:measurementPoint(e)};setMeasurePreview(measure.current);return;
     }
     if(tool==='measure'&&!spaceHeld.current){measurementPoint(e);return;}
+    if(tool==='wall'){if(wallDraft.current){wallDraft.current={...wallDraft.current,b:wallPoint(e)};setWallPreview(wallDraft.current);}return;}
     const g=drag.current; if(!g)return;
     const p=new DOMPoint(e.clientX,e.clientY).matrixTransform(g.matrix);
     if(g.kind==='room-label'){
@@ -257,6 +274,14 @@ export default function FloorPlanEditor({ fileSession = null }) {
     setDoc({...g.before,furniture:g.before.furniture.map(f=>f.id===g.id?{...f,cx:snapped.cx,cy:snapped.cy}:f)});
   }
   function finishDrag(e,cancel=false) {
+    const tap=wallGesture.current;
+    if(tap&&tap.pointerId===e.pointerId){
+      if(cancel){cancelWall();return;}
+      wallGesture.current=null;
+      if(svg.current.hasPointerCapture(e.pointerId))svg.current.releasePointerCapture(e.pointerId);
+      if(Math.hypot(e.clientX-tap.x,e.clientY-tap.y)<6)placeWallPoint(e);
+      return;
+    }
     const measurement=measureGesture.current;
     if(measurement&&measurement.pointerId===e.pointerId){
       if(cancel){cancelMeasure();return;}
@@ -329,6 +354,40 @@ export default function FloorPlanEditor({ fileSession = null }) {
     try {saveDocument(doc);setStatus(autosave.current?'已儲存到此裝置':'已儲存到此裝置，自動儲存已恢復');autosave.current=true;setCanRestoreSession(!!sessionDocument());}catch(error){setStatus(`儲存失敗：${error.message}`);}
   }
   function rename(name) {if(name!==doc.name)commit({...doc,name});}
+  // An edit through the core commands (roadmap D4), on the newest plan: one undo step with its label, or no change
+  // and the reasons in the panel. The notes and warnings of the commands stay visible after the edit.
+  function applyEdit(commands,label) {
+    const current=commitPendingEdit(),result=runEdit(current,commands);
+    if(result.status==='refused'){setEditNotice({tone:'error',lines:editMessages(result.errors)});setStatus('沒有變更：這個操作不符合平面圖規則');return result;}
+    if(result.status==='same'){setEditNotice(null);return result;}
+    commit(labelChange(result.plan,label,current),current);
+    const also=editNoteLines(result);
+    setEditNotice(also.lines.length?{tone:'info',...also}:null);setStatus(`已${label}`);
+    return result;
+  }
+  function addWall(a,b,type='n') {
+    const result=applyEdit([{op:'add_wall',type,a,b,thickness:newWallThickness(latestDoc.current,a)}],'新增牆');
+    // A wall from the panel also ends a first point from the drawing: the next point starts a new wall.
+    if(result.status==='ok')cancelWall();
+    return result;
+  }
+  const wallPoint=e=>{const p=point(e);return snapWallPoint([p.x,p.y],latestDoc.current,8*ratio*25.4/96,wallDraft.current?.a);};
+  // A point of the add-wall tool is a tap: it is placed at pointer up, so a second finger (pinch) or a cancelled
+  // pointer drops it, and nothing is added during a two-finger gesture.
+  function startWall(e) {
+    if(view!=='2d'||tool!=='wall'||spaceHeld.current||e.button!==0||!e.isPrimary)return;
+    e.preventDefault();e.stopPropagation();
+    wallGesture.current={pointerId:e.pointerId,x:e.clientX,y:e.clientY};
+    // The capture keeps the pointer up on the drawing. A pointer that is already gone cannot be captured; the tap still works.
+    try{svg.current.setPointerCapture(e.pointerId);}catch{/* no active pointer */}
+  }
+  function placeWallPoint(e) {
+    const draft=wallDraft.current,p=wallPoint(e);
+    if(!draft){commitPendingEdit();wallDraft.current={a:p,b:p,generation:planGeneration.current};setWallPreview(wallDraft.current);return;}
+    // The open plan was swapped after the first point: the wall is dropped.
+    if(draft.generation===planGeneration.current&&(p[0]!==draft.a[0]||p[1]!==draft.a[1]))addWall(draft.a,p);
+    cancelWall();
+  }
   // Scales the newest plan from a measurement and the typed real distance, through the core command. The preview that
   // the panel showed is not used: the plan can be newer. One undo step; in file mode the file is backed up first.
   function applyScale(id,distance) {
@@ -442,16 +501,16 @@ export default function FloorPlanEditor({ fileSession = null }) {
       :{kind:'website',label:'網站模式 · 儲存在此瀏覽器',saveLabel:'儲存到此裝置',help:'專案保存在這個瀏覽器內。要換電腦時，先匯出 JSON，再在另一台電腦匯入。多專案管理尚未加入。'},
     onRestoreSession:fileSession?null:restoreSession,canRestoreSession,
   };
-  return <WorkspaceShell planActions={planActions} unit={unit} onUnit={setUnit} doc={doc} status={tool==='measure'&&view==='2d'?'點選兩點或拖曳測量 · Shift 鎖定水平／垂直 · Esc 取消':status} view={view} onView={setView} tool={spacePan?'pan':tool} onTool={setTool}
+  return <WorkspaceShell planActions={planActions} unit={unit} onUnit={setUnit} doc={doc} status={tool==='measure'&&view==='2d'?'點選兩點或拖曳測量 · Shift 鎖定水平／垂直 · Esc 取消':tool==='wall'&&view==='2d'?(editNotice?.tone==='error'?status:wallPreview?'點選終點 · Esc 取消':'點選起點和終點來新增牆，或在「物件屬性」輸入數值 · Esc 取消'):status} view={view} onView={setView} tool={spacePan?'pan':tool} onTool={setTool}
     selected={selected} selectedRoom={room?.id} selectedWall={wall?.id} selectedMeasurement={selectedMeasurement} onPropertiesShown={setPropertiesShown} selectionRequest={selectionRequest} history={history} onSelect={selectFurniture} onRestore={snapshot=>{swapPlanGeneration();commit(snapshot);}}
     onRename={rename} onSave={saveNow} onExport={exportPlan} onUndo={undo} onRedo={redo}
     onRotate={()=>patch({rot:(item.rot+90)%360})} onDuplicate={duplicateSelected} onDelete={removeSelected}
     onZoom={zoom} onFit={fit} ratio={ratio} onRatio={setRatio} scaleBar={scaleBar}
     wallSnap={wallSnap} onToggleWallSnap={()=>setWallSnap(value=>!value)} layers={layers} onToggleLayer={toggleLayer} onToggleLayerLock={toggleLayerLock} onClearMeasurements={clearMeasurements} onDeleteMeasurement={deleteMeasurement} showDimensions={layers.dimensions} onToggleDimensions={()=>toggleLayer('dimensions')}
     library={<div className="library"><p>選擇家具加入圖面，再拖曳至所需位置。</p>{LIB.map(category=><details key={category.cat} open><summary>{category.cat}</summary><div className="catalog">{category.items.map((entry,i)=><button key={i} disabled={layers.locked.furniture} onClick={()=>add(entry)}><span>{entry[1]}</span><small>{formatLength(entry[2],unit)} × {formatLength(entry[3],unit)} {unit}</small></button>)}</div></details>)}</div>}
-    costEstimate={<CostEstimate doc={doc} onChange={costEstimate=>commit({...doc,costEstimate})}/>} properties={wall?<WallProperties wall={wall} unit={unit} onToggle={toggleDemolition}/>:room?<RoomProperties nameLocked={layers.locked.roomNames} room={room} doc={doc} unit={unit} onPatch={patchRoom} onSelectFurniture={selectFurniture}/>:selectedMeasurement&&!item?<MeasurementProperties key={`${selectedMeasurement}-${scaleSession}`} doc={doc} measurementId={selectedMeasurement} unit={unit} shown={propertiesShown} onApply={distance=>applyScale(selectedMeasurement,distance)} onDelete={()=>deleteMeasurement(selectedMeasurement)} onSession={open=>{scalingOpen.current=open;}}/>:<div className="inspector">{item?<><h3>{item.name}</h3><FurnitureAppearance nameLocked={layers.locked.furnitureLabels} key={item.id} item={item} onPatch={patch}/>{[['cx','X'],['cy','Y'],['w','寬度'],['d','深度'],['rot','旋轉角度']].map(([key,label])=><label key={key}>{label}<div><input key={`${item.id}-${key}-${item[key]}-${unit}`} type="number" defaultValue={key==='rot'?item[key]:formatLength(item[key],unit)} min={key==='w'||key==='d'?10/unitFactor(unit):undefined} step={key==='rot'?1:10/unitFactor(unit)} onKeyDown={e=>{if(e.key==='Enter'&&!e.nativeEvent.isComposing)e.currentTarget.blur();}} onBlur={e=>{const shown=key==='rot'?String(item[key]):formatLength(item[key],unit),value=Number(e.target.value)*(key==='rot'?1:unitFactor(unit));if(e.target.value!==''&&Number(e.target.value)!==Number(shown)&&Number.isFinite(value)&&(!['w','d'].includes(key)||value>0)&&value!==item[key])patch({[key]:value});else e.target.value=shown;}}/><span>{key==='rot'?'°':unit}</span></div></label>)}<button onClick={()=>patch({rot:(item.rot+90)%360})}><RotateCw size={16}/>旋轉 90°</button><button onClick={()=>{commit({...doc,furniture:doc.furniture.filter(f=>f.id!==item.id)});setSelected(null);}}><Trash2 size={16}/>刪除家具</button></>:<p>選取家具或空間以查看及編輯屬性。</p>}<div className="note"><strong>編輯提示</strong><p>2D 與 3D 共用同一份平面圖。家具編輯會同步顯示。拖曳家具靠近牆面會吸附，按住 Alt / Option 暫停吸附。滾輪縮放、按住空白鍵拖曳平移；觸控以雙指縮放與平移；Esc 取消選取，Delete 刪除家具，⌘ / Ctrl + Z 復原，Shift + ⌘ / Ctrl + Z 重做。</p></div></div>}>
+    costEstimate={<CostEstimate doc={doc} onChange={costEstimate=>commit({...doc,costEstimate})}/>} properties={<><EditNotice notice={editNotice} rooms={doc.rooms} onSelectRoom={selectRoom} onClose={()=>setEditNotice(null)}/>{tool==='wall'&&view==='2d'?<AddWallPanel key={unit} unit={unit} start={wallPreview?.a} onAdd={(from,direction,length,type)=>addWall(from,wallEnd(from,direction,length),type)}/>:wall?<WallProperties wall={wall} doc={doc} unit={unit} onEdit={applyEdit} onDeleted={()=>setSelectedWall(null)}/>:room?<RoomProperties nameLocked={layers.locked.roomNames} room={room} doc={doc} unit={unit} onPatch={patchRoom} onSelectFurniture={selectFurniture}/>:selectedMeasurement&&!item?<MeasurementProperties key={`${selectedMeasurement}-${scaleSession}`} doc={doc} measurementId={selectedMeasurement} unit={unit} shown={propertiesShown} onApply={distance=>applyScale(selectedMeasurement,distance)} onDelete={()=>deleteMeasurement(selectedMeasurement)} onSession={open=>{scalingOpen.current=open;}}/>:<div className="inspector">{item?<><h3>{item.name}</h3><FurnitureAppearance nameLocked={layers.locked.furnitureLabels} key={item.id} item={item} onPatch={patch}/>{[['cx','X'],['cy','Y'],['w','寬度'],['d','深度'],['rot','旋轉角度']].map(([key,label])=><label key={key}>{label}<div><input key={`${item.id}-${key}-${item[key]}-${unit}`} type="number" defaultValue={key==='rot'?item[key]:formatLength(item[key],unit)} min={key==='w'||key==='d'?10/unitFactor(unit):undefined} step={key==='rot'?1:10/unitFactor(unit)} onKeyDown={e=>{if(e.key==='Enter'&&!e.nativeEvent.isComposing)e.currentTarget.blur();}} onBlur={e=>{const shown=key==='rot'?String(item[key]):formatLength(item[key],unit),value=Number(e.target.value)*(key==='rot'?1:unitFactor(unit));if(e.target.value!==''&&Number(e.target.value)!==Number(shown)&&Number.isFinite(value)&&(!['w','d'].includes(key)||value>0)&&value!==item[key])patch({[key]:value});else e.target.value=shown;}}/><span>{key==='rot'?'°':unit}</span></div></label>)}<button onClick={()=>patch({rot:(item.rot+90)%360})}><RotateCw size={16}/>旋轉 90°</button><button onClick={()=>{commit({...doc,furniture:doc.furniture.filter(f=>f.id!==item.id)});setSelected(null);}}><Trash2 size={16}/>刪除家具</button></>:<p>選取家具或空間以查看及編輯屬性。</p>}<div className="note"><strong>編輯提示</strong><p>2D 與 3D 共用同一份平面圖。家具編輯會同步顯示。拖曳家具靠近牆面會吸附，按住 Alt / Option 暫停吸附。滾輪縮放、按住空白鍵拖曳平移；觸控以雙指縮放與平移；Esc 取消選取，Delete 刪除家具，⌘ / Ctrl + Z 復原，Shift + ⌘ / Ctrl + Z 重做。</p></div></div>}</>}>
       {view==='3d'?<ErrorBoundary fallback={()=><div className="view-loading" role="alert"><div className="space-y-3 text-center"><p>無法載入 3D 檢視。平面圖資料未受影響；網路恢復後，請先儲存再重新整理頁面。</p><button type="button" className="rounded-lg border border-slate-300 px-3 py-1.5" onClick={()=>setView('2d')}>返回 2D</button></div></div>}><Suspense fallback={<div className="view-loading" role="status">載入 3D 檢視…</div>}><FloorPlan3D unit={unit} wallSnap={wallSnap} layers={layers} doc={doc} selected={selected} selectedRoom={room?.id} selectedWall={wall?.id} onSelectWall={selectWall} onSelectRoom={selectRoom} onSelect={selectFurniture} onMove={moveFurniture} dragToken={()=>planGeneration.current} controlRef={view3d} frameKey={planKey}/></Suspense></ErrorBoundary>:(
-      <svg ref={svg} className={tool==='pan'||spacePan?'plan-svg pan-tool':tool==='measure'?'plan-svg measure-tool':'plan-svg'} viewBox={`${viewport.x} ${viewport.y} ${viewport.width} ${viewport.height}`} aria-label="Apartment floor plan" onPointerDownCapture={startMeasure} onContextMenu={e=>{if(tool==='measure'){e.preventDefault();cancelMeasure();}}} onPointerDown={startPan} onPointerMove={move} onPointerLeave={()=>{if(!measureGesture.current)setMeasurementSnap(null);}} onPointerUp={e=>finishDrag(e)} onPointerCancel={e=>finishDrag(e,true)}>
+      <svg ref={svg} className={tool==='pan'||spacePan?'plan-svg pan-tool':tool==='measure'?'plan-svg measure-tool':'plan-svg'} viewBox={`${viewport.x} ${viewport.y} ${viewport.width} ${viewport.height}`} aria-label="Apartment floor plan" onPointerDownCapture={e=>{startMeasure(e);startWall(e);}} onContextMenu={e=>{if(tool==='measure'){e.preventDefault();cancelMeasure();}}} onPointerDown={startPan} onPointerMove={move} onPointerLeave={()=>{if(!measureGesture.current)setMeasurementSnap(null);}} onPointerUp={e=>finishDrag(e)} onPointerCancel={e=>finishDrag(e,true)}>
         <defs><FloorPatterns/><RoomPatterns rooms={doc.rooms}/><pattern id="grid" width="500" height="500" patternUnits="userSpaceOnUse"><path d="M 500 0 L 0 0 0 500" fill="none" stroke="#dddcd5" strokeWidth="12"/></pattern></defs>
         <rect x={gridArea[0]} y={gridArea[1]} width={gridArea[2]-gridArea[0]} height={gridArea[3]-gridArea[1]} fill="url(#grid)"/>
         {doc.rooms.map((r,ri)=><polygon key={r.id} data-room-id={r.id} points={r.poly.map(p=>p.join(',')).join(' ')} fill={roomFloorFill(r,ri,doc.materials[r.mat]?.sw||'#eee')} onPointerDown={e=>{if(e.button===0&&tool==='select'&&!spaceHeld.current){e.stopPropagation();if(e.pointerType==='touch'){touchRoom.current={id:r.id,pointerId:e.pointerId,x:e.clientX,y:e.clientY};svg.current.setPointerCapture(e.pointerId);}else selectRoom(r.id);}}}/>)}
@@ -464,9 +523,13 @@ export default function FloorPlanEditor({ fileSession = null }) {
           {selected===f.id && <rect className="selected-furniture-outline" x={-f.w/2-24} y={-f.d/2-24} width={f.w+48} height={f.d+48} rx="40" fill="none" stroke="#2563eb" strokeWidth="2" vectorEffect="non-scaling-stroke" pointerEvents="none"/>}
         </g>)}
         {layers.furnitureLabels&&<g className="furniture-labels" pointerEvents="none">{doc.furniture.filter(f=>Math.min(f.w,f.d)>=380&&!NO_FURNITURE_LABEL.has(f.type)).map(f=><text key={f.id} x={f.cx} y={f.cy} fontSize={Math.max(80,Math.min(170,Math.min(f.w,f.d)*.2))} textAnchor="middle" dominantBaseline="central" fill="#4a443c" opacity=".8">{f.name}</text>)}</g>}
-        {planGeometry(doc).solids.map((w,i)=><rect key={`${w.wallId}:${i}`} data-wall-id={w.wallId} className={wall?.id===w.wallId?'selected-wall-outline':undefined} x={w.rect[0]} y={w.rect[1]} width={w.rect[2]-w.rect[0]} height={w.rect[3]-w.rect[1]} fill={w.demolished?'#ef4444':w.type==='b'?'#000000':w.type==='low'?'#e9e3d8':w.type==='e'?'#8f897d':'#a7a195'} fillOpacity={w.demolished?0.12:1} stroke={wall?.id===w.wallId?'#f59e0b':w.demolished?'#ef4444':w.type==='low'?'#8f897d':'none'} strokeWidth={wall?.id===w.wallId?3:1.2} strokeDasharray={w.demolished?'5 3':undefined} vectorEffect="non-scaling-stroke" onPointerDown={e=>{if(e.button===0&&tool==='select'&&!spaceHeld.current){e.stopPropagation();if(e.pointerType==='touch'){touchRoom.current={kind:'wall',id:w.wallId,pointerId:e.pointerId,x:e.clientX,y:e.clientY};svg.current.setPointerCapture(e.pointerId);}else selectWall(w.wallId);}}}/>)}
+        {/* Each wall has a hit area on its centre line, so a wall that openings fill completely can be selected. */}
+        {doc.walls.map(w=><line key={w.id} data-wall-line={w.id} x1={w.a[0]} y1={w.a[1]} x2={w.b[0]} y2={w.b[1]} stroke={wall?.id===w.id?'#f59e0b':'transparent'} strokeOpacity=".35" strokeWidth={w.thickness} pointerEvents="stroke" onPointerDown={e=>wallDown(e,w.id)}/>)}
+        {planGeometry(doc).solids.map((w,i)=><rect key={`${w.wallId}:${i}`} data-wall-id={w.wallId} className={wall?.id===w.wallId?'selected-wall-outline':undefined} x={w.rect[0]} y={w.rect[1]} width={w.rect[2]-w.rect[0]} height={w.rect[3]-w.rect[1]} fill={w.demolished?'#ef4444':w.type==='b'?'#000000':w.type==='low'?'#e9e3d8':w.type==='e'?'#8f897d':'#a7a195'} fillOpacity={w.demolished?0.12:1} stroke={wall?.id===w.wallId?'#f59e0b':w.demolished?'#ef4444':w.type==='low'?'#8f897d':'none'} strokeWidth={wall?.id===w.wallId?3:1.2} strokeDasharray={w.demolished?'5 3':undefined} vectorEffect="non-scaling-stroke" onPointerDown={e=>wallDown(e,w.wallId)}/>)}
 
         <OpeningSymbols openings={planGeometry(doc).openings}/>
+        {wall&&view==='2d'&&<g className="selected-wall-ends" pointerEvents="none">{[['a',wall.a],['b',wall.b]].map(([key,p])=><g key={key} data-wall-end-mark={key}><circle cx={p[0]} cy={p[1]} r={9*ratio*25.4/96} fill="#f59e0b" stroke="#fff" strokeWidth="1.5" vectorEffect="non-scaling-stroke"/><text x={p[0]} y={p[1]} fontSize={12*ratio*25.4/96} fontWeight="700" textAnchor="middle" dominantBaseline="central" fill="#fff">{key}</text></g>)}</g>}
+        {wallPreview&&<line data-wall-preview x1={wallPreview.a[0]} y1={wallPreview.a[1]} x2={wallPreview.b[0]} y2={wallPreview.b[1]} stroke="#2563eb" strokeOpacity=".45" strokeWidth={newWallThickness(doc,wallPreview.a)} pointerEvents="none"/>}
         <SnapGuides guides={snapGuides} unit={unit} ratio={ratio}/>
         <Measurements selectedId={selectedMeasurement} onSelect={selectMeasurement} selectable={tool==='select'&&!spacePan&&!layers.locked.dimensions} measurements={layers.dimensions?doc.measurements:[]} preview={measurePreview} snapPoint={measurementSnap} unit={unit} ratio={ratio}/>
         {layers.dimensions&&<DimensionLines chains={doc.dimensions} unit={unit}/>}
