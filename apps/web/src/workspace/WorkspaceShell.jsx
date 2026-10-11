@@ -55,7 +55,7 @@ function describeChange(before,after) {
   }
   return '編輯平面圖';
 }
-export default function WorkspaceShell({planActions,unit='mm',onUnit,doc,status,view,onView,tool,onTool,library,properties,costEstimate,selected,selectedRoom,selectedWall,selectedMeasurement,onPropertiesShown,selectionRequest,history,onSelect,onRestore,onRename,onSave,onExport,onUndo,onRedo,onRotate,onDuplicate,onDelete,onZoom,onFit,ratio,onRatio,scaleBar,wallSnap,onToggleWallSnap,layers,onToggleLayer,onToggleLayerLock,onClearMeasurements,onDeleteMeasurement,showDimensions,onToggleDimensions,children}) {
+export default function WorkspaceShell({planActions,unit='mm',onUnit,doc,status,view,onView,tool,onTool,library,properties,costEstimate,selected,selectedRoom,selectedWall,selectedOpening,selectedMeasurement,onPropertiesShown,selectionRequest,history,onSelect,onRestore,onRename,onSave,onExport,onUndo,onRedo,onRotate,onDuplicate,onDelete,onZoom,onFit,ratio,onRatio,scaleBar,wallSnap,onToggleWallSnap,layers,onToggleLayer,onToggleLayerLock,onClearMeasurements,onDeleteMeasurement,showDimensions,onToggleDimensions,children}) {
   const root=useRef(null);
   // Import (roadmap B3): the header, the plan panel and the empty plan open the same file input; a file dropped
   // anywhere on the workspace is imported the same way.
@@ -103,12 +103,12 @@ export default function WorkspaceShell({planActions,unit='mm',onUnit,doc,status,
   // also change the tool, and must not open a panel that the user closed.
   const openForTool=tool==='wall';
   useEffect(()=>{
-    if(!(selected||selectedRoom||selectedWall||selectedMeasurement))return;
+    if(!(selected||selectedRoom||selectedWall||selectedOpening||selectedMeasurement))return;
     // On a phone the panel is an overlay over the canvas; in 3D it would block the drag that follows a tap-to-select.
     if(window.innerWidth<768&&view==='3d')return;
     // At tablet width, keep the furniture library open: adding an item selects it, and closing the library would interrupt adding more.
     setWorkspace(w=>window.innerWidth>=768&&singlePanel()&&w.leftOpen&&w.leftTab==='furniture'?w:{...w,rightOpen:true,rightTab:'properties',...(singlePanel()?{leftOpen:false}:{})});
-  },[selected,selectedRoom,selectedWall,selectedMeasurement,selectionRequest]);
+  },[selected,selectedRoom,selectedWall,selectedOpening,selectedMeasurement,selectionRequest]);
   useEffect(()=>{if(openForTool)setWorkspace(w=>({...w,rightOpen:true,rightTab:'properties',...(singlePanel()?{leftOpen:false}:{})}));},[openForTool]);
   // The properties panel stays mounted when it is hidden; the editor must know when the user can see it.
   const propertiesShown=workspace.rightOpen&&workspace.rightTab==='properties';

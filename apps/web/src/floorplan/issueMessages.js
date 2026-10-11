@@ -65,6 +65,8 @@ const TEXT = {
   'walls-demolition-differs': () => '兩段牆的拆除狀態不同',
   'walls-not-touching': () => '兩段牆沒有相接',
   'join-same-wall': () => '不能和自己合併',
+  'field-not-for-type': () => '這個類型的門窗沒有這個欄位',
+  'opening-type-unchanged': () => '類型沒有改變',
   'opening-missing': p => `找不到開口「${p.openingId}」`,
   'plan-too-large': p => `平面圖 ${(p.width / 1000).toFixed(1)} × ${(p.depth / 1000).toFixed(1)} m，超過 ${p.limit / 1000} × ${p.limit / 1000} m`,
 };
@@ -80,13 +82,16 @@ const NAMED_FIELDS = ['type', 'thickness', 'name', 'offset', 'width', 'sill', 'h
 
 /**
  * The errors of a refused edit (roadmap D4) as zh-TW lines. An error of a command has a path inside the command
- * (`commands[0].thickness`), which means nothing to the user, so the line names only the field.
+ * (`commands[0].thickness`), which means nothing to the user, so the line names only the field. `wallId` is the wall
+ * of an opening only in a move of an opening (`commands` gives the op); in a wall command it is the wall itself, so it
+ * gets no name.
  */
-export function editMessages(errors, max = 5) {
+export function editMessages(errors, commands = [], max = 5) {
   const line = issue => {
-    const command = /^commands\[\d+\](?:\.(\w+))?/.exec(issue.path);
+    const command = /^commands\[(\d+)\](?:\.(\w+))?/.exec(issue.path);
     if (!command) return issue.code === 'scale-result-invalid' ? null : issueMessage(issue);
-    const text = TEXT[issue.code]?.(issue.params ?? {}) ?? issue.code, field = NAMED_FIELDS.includes(command[1]) && FIELDS[command[1]];
+    const named = NAMED_FIELDS.includes(command[2]) || command[2] === 'wallId' && commands[Number(command[1])]?.op === 'move_opening';
+    const text = TEXT[issue.code]?.(issue.params ?? {}) ?? issue.code, field = named && FIELDS[command[2]];
     return field ? `${field}：${text}` : text;
   };
   const lines = errors.slice(0, max).map(line).filter(Boolean);

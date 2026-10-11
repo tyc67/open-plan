@@ -77,8 +77,11 @@ try {
 
   // 1. Selection: a wall with a solid part, and a wall that an opening fills completely.
   check('setup: the wall "full" has no solid part', (await page.locator('rect[data-wall-id="full"]').count()) === 0 && (await page.locator('rect[data-wall-id="outer"]').count()) >= 1);
-  await select('full');
-  check('select: the centre-line hit area selects a wall with no solid part', (await panel('full').count()) === 1);
+  // A real click there selects the hole (D4b: the opening is above its wall); the wall is one action away.
+  await clickPlan([450, 6000]);
+  check('select: a click on a wall with no solid part selects the opening that fills it', (await page.locator('[data-opening-panel="h1"]').count()) === 1 && (await panel().count()) === 0);
+  await page.locator('[data-opening-select-wall]').click();
+  check('select: the action in the opening panel selects a wall with no solid part', (await panel('full').count()) === 1);
   await page.locator('rect[data-wall-id="outer"]').first().dispatchEvent('pointerdown', { button: 0, pointerType: 'mouse' });
   check('select: a solid part selects its wall, and the ends a and b are marked', (await panel('outer').count()) === 1 && (await page.locator('[data-wall-end-mark]').evaluateAll(marks => marks.map(m => m.textContent).join(''))) === 'ab');
 

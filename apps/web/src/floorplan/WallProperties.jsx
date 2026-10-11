@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { wallLength } from 'open-plan-core';
 import { formatLength, unitFactor } from './units.js';
 import { joinCandidates, wallLengthCommand, wallPoint } from './planEdit.js';
+import { WallOpenings } from './OpeningProperties.jsx';
 
 export const canDemolish=wall=>['n','low'].includes(wall.type);
 // A demolished bearing or exterior wall (a tolerable issue in a saved plan) can be restored, but not demolished again.
@@ -16,7 +17,7 @@ const typed=(text,unit)=>{const value=Number(String(text).trim());return String(
  * The panel of a selected wall (roadmap D4a). Each control sends core commands through `onEdit(commands, label)`,
  * which changes the plan as one undo step, or changes nothing and shows the reasons.
  */
-export default function WallProperties({wall,doc,unit,onEdit,onDeleted}) {
+export default function WallProperties({wall,doc,unit,onEdit,onDeleted,onAddOpening,onSelectOpening}) {
   const length=wallLength(wall),openings=doc.openings.filter(o=>o.wallId===wall.id).length;
   const [end,setEnd]=useState('b');
   const candidates=useMemo(()=>joinCandidates(doc,wall.id),[doc,wall.id]);
@@ -42,6 +43,7 @@ export default function WallProperties({wall,doc,unit,onEdit,onDeleted}) {
       </label>
       <dl className="mt-3 grid grid-cols-2 gap-y-3 text-xs"><dt>狀態</dt><dd data-wall-state>{wall.demolished?'已標記拆除':'保留'}</dd><dt>開口</dt><dd>{openings} 個</dd></dl>
     </div>
+    <WallOpenings wall={wall} doc={doc} unit={unit} onAdd={onAddOpening} onSelectOpening={onSelectOpening}/>
     <div className="workspace-card"><h3>長度</h3>
       <p className="workspace-help mt-2">輸入牆的新長度。選擇要移動的端點；另一個端點不動。圖面上標示了 a 和 b。</p>
       <div className="mt-2 flex gap-4 text-xs" role="radiogroup" aria-label="要移動的端點">{['a','b'].map(key=><label key={key} className="flex items-center gap-1.5"><input type="radio" name="wall-end" data-wall-end={key} checked={end===key} onChange={()=>setEnd(key)}/>移動{END_NAMES[key]}</label>)}</div>
