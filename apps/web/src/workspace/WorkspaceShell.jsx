@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Box, Calculator, PenLine, ChevronDown, Copy, Download, FilePlus2, FileUp, Undo, X, Building2, Eye, EyeOff, FolderOpen, Grid2X2, Hand, History, Home, Layers3, LockKeyhole, UnlockKeyhole, Maximize2, Minimize2, Moon, MoreHorizontal, MousePointer2, PanelLeftClose, PanelRightClose, Pencil, Redo2, RotateCw, Ruler, ScanLine, Save, Settings, SlidersHorizontal, Sofa, Sun, SwatchBook, Trash2, Undo2, ZoomIn, ZoomOut } from 'lucide-react';
+import { Box, Calculator, PenLine, SquarePlus, ChevronDown, Copy, Download, FilePlus2, FileUp, Undo, X, Building2, Eye, EyeOff, FolderOpen, Grid2X2, Hand, History, Home, Layers3, LockKeyhole, UnlockKeyhole, Maximize2, Minimize2, Moon, MoreHorizontal, MousePointer2, PanelLeftClose, PanelRightClose, Pencil, Redo2, RotateCw, Ruler, ScanLine, Save, Settings, SlidersHorizontal, Sofa, Sun, SwatchBook, Trash2, Undo2, ZoomIn, ZoomOut } from 'lucide-react';
 import CostDock from './CostDock.jsx';
 import PanelRail from './PanelRail.jsx';
 import WorkspacePanel from './WorkspacePanel.jsx';
@@ -99,9 +99,9 @@ export default function WorkspaceShell({planActions,unit='mm',onUnit,doc,status,
   }
   function finishName(){const next=name.trim()||'未命名平面圖';setName(next);onRename(next);}
   const current=doc.furniture.find(f=>f.id===selected);
-  // The add-wall tool has its form in the properties panel. Only this tool opens the panel: Space (pan) and M (measure)
+  // The add-wall and add-room tools have their forms in the properties panel. Only these tools open the panel: Space (pan) and M (measure)
   // also change the tool, and must not open a panel that the user closed.
-  const openForTool=tool==='wall';
+  const openForTool=tool==='wall'||tool==='room';
   useEffect(()=>{
     if(!(selected||selectedRoom||selectedWall||selectedOpening||selectedMeasurement))return;
     // On a phone the panel is an overlay over the canvas; in 3D it would block the drag that follows a tap-to-select.
@@ -150,7 +150,7 @@ export default function WorkspaceShell({planActions,unit='mm',onUnit,doc,status,
         <ScrollToolbar className="absolute left-3 top-3 z-20 max-w-[calc(100%_-_24px)] rounded-xl border border-[#d8e2ee] bg-white/95 p-1.5 shadow-sm dark:border-[#3b4d68] dark:bg-[#18243a]/95 max-sm:max-w-[calc(100%_-_76px)]" role="toolbar" aria-label="畫布工具">
           <div className="flex shrink-0 items-center gap-1" role="group" aria-label="畫布檢視模式">{[['2d',Grid2X2,'2D 平面圖'],['3d',Box,'3D 檢視']].map(([id,Icon,label])=><button key={id} type="button" className={canvasButton+(view===id?' bg-[#4d72e1] !text-white':'')} aria-label={label} aria-pressed={view===id} onClick={()=>onView(id)}><Icon className="size-4"/></button>)}</div>
           <span className="mx-1 h-5 border-l border-[#d8e2ee] dark:border-[#3b4d68]"/>
-          {view==='2d'&&[['select',MousePointer2,'選取物件'],['pan',Hand,'瀏覽畫布'],['measure',ScanLine,'測量距離（M）'],['wall',PenLine,'新增牆']].map(([id,Icon,label])=><button type="button" key={id} className={canvasButton+(tool===id?' bg-[#4d72e1] !text-white':'')} aria-label={label} aria-pressed={tool===id} onClick={()=>onTool(id)}><Icon className="size-4"/></button>)}
+          {view==='2d'&&[['select',MousePointer2,'選取物件'],['pan',Hand,'瀏覽畫布'],['measure',ScanLine,'測量距離（M）'],['wall',PenLine,'新增牆'],['room',SquarePlus,'新增空間']].map(([id,Icon,label])=><button type="button" key={id} data-tool={id} className={canvasButton+(tool===id?' bg-[#4d72e1] !text-white':'')} aria-label={label} aria-pressed={tool===id} onClick={()=>onTool(id)}><Icon className="size-4"/></button>)}
           <button type="button" className={canvasButton} onClick={()=>openLeft('furniture')} aria-label="加入家具"><Sofa className="size-4"/></button>
           {view==='2d'&&<button type="button" className={canvasButton+(showDimensions?' bg-blue-50 text-blue-600 dark:bg-[#263b6a] dark:text-blue-200':'')} aria-label="顯示尺寸" aria-pressed={showDimensions} onClick={onToggleDimensions}><Ruler className="size-4"/></button>}
           <span className="mx-1 h-5 border-l border-[#d8e2ee] dark:border-[#3b4d68]"/>

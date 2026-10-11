@@ -67,6 +67,7 @@ const TEXT = {
   'join-same-wall': () => '不能和自己合併',
   'field-not-for-type': () => '這個類型的門窗沒有這個欄位',
   'opening-type-unchanged': () => '類型沒有改變',
+  'room-missing': p => `找不到空間「${p.roomId}」`,
   'opening-missing': p => `找不到開口「${p.openingId}」`,
   'plan-too-large': p => `平面圖 ${(p.width / 1000).toFixed(1)} × ${(p.depth / 1000).toFixed(1)} m，超過 ${p.limit / 1000} × ${p.limit / 1000} m`,
 };

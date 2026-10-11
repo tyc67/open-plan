@@ -1,4 +1,4 @@
-import { applyCommands, DEFAULT_HEIGHTS, wallDirection, wallLength } from 'open-plan-core';
+import { applyCommands, DEFAULT_HEIGHTS, wallDirection, wallLength, wallRect } from 'open-plan-core';
 
 // Editing in the editor through the core commands (roadmap D4): an edit is a batch of commands on the open plan, so
 // the editor, the CLI and MCP follow the same rules. A refused batch changes nothing.
@@ -154,4 +154,88 @@ export function dragOffset(plan, openingId, wanted) {
 export function wallHeading(wall) {
   const [dx, dy] = wallDirection(wall);
   return dx > 0 ? 'right' : dx < 0 ? 'left' : dy > 0 ? 'down' : 'up';
+}
+
+// ---- Rooms (roadmap D4c) ----
+
+export const samePoly = (a, b) => a.length === b.length && a.every((p, i) => p[0] === b[i][0] && p[1] === b[i][1]);
+
+/** The outline with the point `index` at `point`. */
+export const movedPoly = (poly, index, point) => poly.map((p, i) => i === index ? [point[0], point[1]] : [p[0], p[1]]);
+
+/** The outline with a new point after the point `index`, at the middle of the edge to the next point. */
+export function insertPoint(poly, index) {
+  const a = poly[index], b = poly[(index + 1) % poly.length];
+  return [...poly.slice(0, index + 1), [round((a[0] + b[0]) / 2), round((a[1] + b[1]) / 2)], ...poly.slice(index + 1)].map(p => [p[0], p[1]]);
+}
+
+/** The outline without the point `index`. */
+export const deletePoint = (poly, index) => poly.filter((_, i) => i !== index).map(p => [p[0], p[1]]);
+
+/** A rectangle from its top-left corner (y goes down), clockwise on the drawing. */
+export const rectanglePoly = (x, y, width, depth) => [[x, y], [round(x + width), y], [round(x + width), round(y + depth)], [x, round(y + depth)]];
+
+/**
+ * A point for a room outline. For each axis: the face of a wall, only when the point is near that face (a wall far
+ * away with the same X or Y does not pull the point); the value of a point in `near` (points of other rooms)
+ * that is within `tolerance` of the point; the value of a point in `align` (the adjacent points of
+ * the same outline, so an edge stays horizontal or vertical); else the 10 mm grid. `free` gives the grid only.
+ */
+export function snapRoomPoint(point, plan, tolerance, { near = [], align = [], free = false } = {}) {
+  const grid = v => Math.round(v / 10) * 10;
+  if (free) return [grid(point[0]), grid(point[1])];
+  const best = [null, null], distance = [tolerance, tolerance];
+  const offer = (axis, value) => { const d = Math.abs(value - point[axis]); if (d <= distance[axis]) { best[axis] = value; distance[axis] = d; } };
+  for (const wall of plan.walls) {
+    const [x0, y0, x1, y1] = wallRect(wall);
+    if (point[1] >= y0 - tolerance && point[1] <= y1 + tolerance) { offer(0, x0); offer(0, x1); }
+    if (point[0] >= x0 - tolerance && point[0] <= x1 + tolerance) { offer(1, y0); offer(1, y1); }
+  }
+  for (const other of near) if (Math.hypot(other[0] - point[0], other[1] - point[1]) <= tolerance) { offer(0, other[0]); offer(1, other[1]); }
+  for (const other of align) { offer(0, other[0]); offer(1, other[1]); }
+  return [best[0] ?? grid(point[0]), best[1] ?? grid(point[1])];
+}
+
+/** The X values where a horizontal line at `y` goes through the outline, sorted. `y` is not the height of a point. */
+function crossings(poly, y) {
+  const xs = [];
+  poly.forEach((a, i) => { const b = poly[(i + 1) % poly.length]; if ((a[1] > y) !== (b[1] > y)) xs.push(a[0] + (b[0] - a[0]) * (y - a[1]) / (b[1] - a[1])); });
+  return xs.sort((p, q) => p - q);
+}
+
+/**
+ * A point that is inside the outline (not on its edge), for the label of a new room. The outline is cut into bands
+ * between the heights of its points; a horizontal line through the middle of a band goes through no point of the
+ * outline, so its parts inside the outline are clear. The result is the middle of the part with the largest
+ * width × band height. Null for an outline with no area.
+ */
+export function interiorPoint(poly) {
+  const heights = [...new Set(poly.map(p => p[1]))].sort((p, q) => p - q);
+  let found = null, largest = 0;
+  for (let band = 0; band + 1 < heights.length; band++) {
+    const y = (heights[band] + heights[band + 1]) / 2, xs = crossings(poly, y);
+    for (let i = 0; i + 1 < xs.length; i += 2) {
+      const size = (xs[i + 1] - xs[i]) * (heights[band + 1] - heights[band]);
+      if (size > largest) { largest = size; found = [(xs[i] + xs[i + 1]) / 2, y]; }
+    }
+  }
+  if (!found) return null;
+  // The rounded point (0.1 mm) is used only when it is still inside the outline: in a very thin room, or beside a
+  // sloping edge, rounding can put it on an edge or outside, and then the exact middle is kept.
+  const x = round(found[0]), y = round(found[1]), xs = heights.includes(y) ? [] : crossings(poly, y);
+  return xs.some((from, i) => i % 2 === 0 && from < x && x < xs[i + 1]) ? [x, y] : found;
+}
+
+/** The material that a plan with no material gets with its first room from the editor. */
+export const DEFAULT_MATERIAL = { key: 'floor', name: '地板', sw: '#e8e2d6' };
+export const NEW_ROOM_NAME = '新空間';
+
+/**
+ * The commands that add a room with the outline `poly`: the first material of the plan, and the label at a point
+ * inside the outline. A plan with no material gets the default material in the same batch.
+ */
+export function addRoomCommands(plan, poly) {
+  const keys = Object.keys(plan.materials), at = interiorPoint(poly);
+  const room = { op: 'add_room', name: NEW_ROOM_NAME, mat: keys[0] ?? DEFAULT_MATERIAL.key, poly: poly.map(p => [p[0], p[1]]), ...(at ? { at } : {}) };
+  return keys.length ? [room] : [{ op: 'set_material', ...DEFAULT_MATERIAL }, room];
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { applyCommands, createEmptyPlan, createSamplePlan, wallLength } from 'open-plan-core';
-import { addOpeningCommand, distanceAlong, dragOffset, joinCandidates, newWallThickness, OPENING_DEFAULTS, openingTypeCommand, openingTypeFields, runEdit, snapWallPoint, wallEnd, wallHeading, wallLengthCommand, wallPoint } from '../src/floorplan/planEdit.js';
+import { applyCommands, containsPoint, createEmptyPlan, createSamplePlan, wallLength } from 'open-plan-core';
+import { addOpeningCommand, addRoomCommands, DEFAULT_MATERIAL, deletePoint, insertPoint, interiorPoint, movedPoly, rectanglePoly, samePoly, snapRoomPoint, distanceAlong, dragOffset, joinCandidates, newWallThickness, OPENING_DEFAULTS, openingTypeCommand, openingTypeFields, runEdit, snapWallPoint, wallEnd, wallHeading, wallLengthCommand, wallPoint } from '../src/floorplan/planEdit.js';
 import { editMessages, editNoteLines } from '../src/floorplan/issueMessages.js';
 
 // Editing in the editor through the core commands (roadmap D4a): the editor builds the commands, and the core decides.
@@ -168,5 +168,97 @@ describe('openings through the core commands', () => {
     for (const [id, wanted] of [['d1', 9000], ['d2', 9000], ['d2', 0]]) expect(runEdit(fine, [{ op: 'move_opening', openingId: id, offset: dragOffset(fine, id, wanted) }]).status).toBe('ok');
     const crowded = plan([wall('w1', [0, 0], [1500, 0])], [door('a', 'w1', 0), door('b', 'w1', 600)]);
     expect([dragOffset(crowded, 'a', 100), dragOffset(p, 'none', 0)]).toEqual([null, null]);
+  });
+});
+
+// Rooms (roadmap D4c): the editor makes the outline, and the core decides.
+describe('rooms through the core commands', () => {
+  const room = (id, poly, more = {}) => ({ id, name: id, mat: 'wood', poly, ...more });
+  const withRooms = (rooms, walls = []) => ({ ...createEmptyPlan(), walls, rooms, materials: { wood: { name: '木地板', sw: '#d8b88a' } } });
+  const square = [[0, 0], [4000, 0], [4000, 3000], [0, 3000]];
+  it('outline helpers: move one point, insert at the middle of an edge (also the closing edge), delete, a rectangle; the input is not changed', () => {
+    expect(movedPoly(square, 2, [5000, 3500])).toEqual([[0, 0], [4000, 0], [5000, 3500], [0, 3000]]);
+    expect(insertPoint(square, 0)).toEqual([[0, 0], [2000, 0], [4000, 0], [4000, 3000], [0, 3000]]);
+    expect(insertPoint(square, 3)).toEqual([[0, 0], [4000, 0], [4000, 3000], [0, 3000], [0, 1500]]);
+    expect(deletePoint(square, 1)).toEqual([[0, 0], [4000, 3000], [0, 3000]]);
+    expect(rectanglePoly(100, 200, 4000, 3000)).toEqual([[100, 200], [4100, 200], [4100, 3200], [100, 3200]]);
+    expect(square).toEqual([[0, 0], [4000, 0], [4000, 3000], [0, 3000]]);
+    expect([samePoly(square, movedPoly(square, 0, [0, 0])), samePoly(square, deletePoint(square, 0)), samePoly(square, movedPoly(square, 0, [1, 0]))]).toEqual([true, false, false]);
+    expect(movedPoly(square, 0, [0, 0])[1]).not.toBe(square[1]);
+  });
+  it('an inserted point works for each direction of the outline: the new point can move, and the core accepts the result', () => {
+    for (const poly of [square, [...square].reverse()]) {
+      const p = withRooms([room('r1', poly)]), more = insertPoint(poly, 1), pulled = movedPoly(more, 2, [more[2][0] + 500, more[2][1] + 500]);
+      expect(runEdit(p, [{ op: 'update_room', roomId: 'r1', poly: more }]).status).toBe('ok');
+      expect(runEdit(p, [{ op: 'update_room', roomId: 'r1', poly: pulled }]).plan.rooms[0].poly).toEqual(pulled);
+    }
+  });
+  it('snap: a wall face only near that face; a point of another room when it is near; the line of an adjacent point; else the 10 mm grid; free gives the grid only', () => {
+    const p = withRooms([], [wall('w1', [0, 0], [4000, 0], { thickness: 200 })]);                 // faces at y -100 and 100, ends at x 0 and 4000
+    expect(snapRoomPoint([2003, 130], p, 50)).toEqual([2000, 100]);                                // near the lower face
+    expect(snapRoomPoint([2003, -70], p, 50)).toEqual([2000, -100]);                               // the nearest of the two faces
+    expect(snapRoomPoint([9003, 130], p, 50)).toEqual([9000, 130]);                                // the same Y, but far from the wall: no pull
+    expect(snapRoomPoint([4030, 2000], p, 50)).toEqual([4030, 2000]);                              // the same X as the wall end, but far from it
+    expect(snapRoomPoint([4030, 120], p, 50)).toEqual([4000, 100]);                                // the corner of the wall
+    expect(snapRoomPoint([3033, 2018], p, 50, { near: [[3000, 2000]] })).toEqual([3000, 2000]);
+    expect(snapRoomPoint([3033, 2078], p, 50, { near: [[3000, 2000]] })).toEqual([3030, 2080]);    // more than the tolerance away
+    expect(snapRoomPoint([3033, 2504], p, 50, { align: [[3000, 7000], [9000, 2500]] })).toEqual([3000, 2500]);
+    expect(snapRoomPoint([2003, 130], p, 50, { near: [[2000, 100]], align: [[2000, 100]], free: true })).toEqual([2000, 130]);
+  });
+  it('the label point of a new room is inside the outline, not on its edge, for a rectangle, an L shape and a U shape', () => {
+    const shapes = { rectangle: square, l: [[0, 0], [4000, 0], [4000, 1000], [1000, 1000], [1000, 3000], [0, 3000]], u: [[0, 0], [1000, 0], [1000, 2000], [3000, 2000], [3000, 0], [4000, 0], [4000, 3000], [0, 3000]] };
+    expect(interiorPoint(square)).toEqual([2000, 1500]);
+    for (const [name, poly] of Object.entries(shapes)) {
+      const at = interiorPoint(poly);
+      // Inside, and so are the points 10 mm around it: the point is not on an edge.
+      expect([name, ...[[0, 0], [10, 0], [-10, 0], [0, 10], [0, -10]].map(([dx, dy]) => containsPoint(poly, at[0] + dx, at[1] + dy))]).toEqual([name, true, true, true, true, true]);
+    }
+    expect(containsPoint(shapes.u, 2000, 1000)).toBe(false);                                       // the middle of the U is outside it
+    expect(interiorPoint([[0, 0], [4000, 0], [8000, 0]])).toBe(null);
+    // Found in a review: point heights at each of the old fixed line heights gave no point, and so a room with no label.
+    const steps = [0, 630, 1110, 1500, 1890, 2370, 3000], stairs = [[0, 0], [4000, 0], ...steps.slice(1).map(y => [4000, y]), [0, 3000], ...steps.slice(1, -1).reverse().map(y => [0, y])];
+    const label = interiorPoint(stairs);
+    expect([label !== null, containsPoint(stairs, label[0], label[1]), steps.includes(label[1])]).toEqual([true, true, false]);
+    expect(addRoomCommands(withRooms([]), stairs)[0].at).toEqual(label);
+    // A very thin room: rounding to 0.1 mm must not put the point on an edge.
+    const thin = interiorPoint([[0, 0], [0.1, 0], [0.1, 100000], [0, 100000]]);
+    expect([thin[0] > 0 && thin[0] < 0.1, thin[1]]).toEqual([true, 50000]);
+    // Found in a review: beside a sloping edge, rounding X and Y one by one gave a point outside the outline.
+    const sliver = [[0, 0], [3000000, 0.11], [3000000, 0.12]], inSliver = interiorPoint(sliver);
+    const strictlyInside = (poly, [x, y]) => { const xs = []; poly.forEach((p, i) => { const q = poly[(i + 1) % poly.length]; if ((p[1] > y) !== (q[1] > y)) xs.push(p[0] + (q[0] - p[0]) * (y - p[1]) / (q[1] - p[1])); }); xs.sort((m, n) => m - n); return xs.length === 2 && xs[0] < x && x < xs[1]; };
+    expect([strictlyInside(sliver, inSliver), strictlyInside(sliver, [1437500, 0.1])]).toEqual([true, false]);
+    const slope = [[0, 0], [4000, 0], [1000, 3000]];                                               // a triangle with two sloping edges
+    expect([interiorPoint(slope), strictlyInside(slope, interiorPoint(slope))]).toEqual([[1500, 1500], true]);
+    // Each band of an L shape is a candidate: the point is in the larger part.
+    expect(interiorPoint(shapes.l)).toEqual([2000, 500]);
+  });
+  it('a new room: the first material and a label inside; a plan with no material gets the default material in the same batch', () => {
+    const p = withRooms([]), commands = addRoomCommands(p, square), result = runEdit(p, commands);
+    expect([commands.length, result.status, result.plan.rooms[0]]).toEqual([1, 'ok', { id: result.plan.rooms[0].id, name: '新空間', mat: 'wood', poly: square, at: [2000, 1500] }]);
+    const bare = { ...createEmptyPlan(), materials: {} }, batch = addRoomCommands(bare, square), made = runEdit(bare, batch);
+    expect(batch.map(c => c.op)).toEqual(['set_material', 'add_room']);
+    expect([made.status, made.plan.materials, made.plan.rooms[0].mat]).toEqual(['ok', { [DEFAULT_MATERIAL.key]: { name: DEFAULT_MATERIAL.name, sw: DEFAULT_MATERIAL.sw } }, DEFAULT_MATERIAL.key]);
+    // The batch is atomic: a refused room adds no material.
+    const crossing = runEdit(bare, addRoomCommands(bare, [[0, 0], [4000, 3000], [4000, 0], [0, 3000]]));
+    expect([crossing.status, editMessages(crossing.errors)[0], bare.materials]).toEqual(['refused', '外框：外框的邊互相交叉', {}]);
+  });
+  it('core rules for an outline edit: crossing and too few points are refused; a room that is too small can grow in steps, and cannot get smaller', () => {
+    const p = withRooms([room('r1', square), room('tiny', [[0, 0], [50, 0], [50, 50], [0, 50]])]);
+    const crossed = runEdit(p, [{ op: 'update_room', roomId: 'r1', poly: movedPoly(square, 0, [3000, 4000]) }]);
+    expect([crossed.status, editMessages(crossed.errors)[0]]).toEqual(['refused', '外框：外框的邊互相交叉']);
+    expect(runEdit(p, [{ op: 'update_room', roomId: 'r1', poly: deletePoint(deletePoint(square, 0), 0) }]).errors[0].code).toBe('room-too-few-points');
+    const tiny = p.rooms[1].poly;
+    expect(runEdit(p, [{ op: 'update_room', roomId: 'tiny', poly: movedPoly(tiny, 2, [60, 60]) }]).status).toBe('ok');             // larger, still below 0.01 m²
+    expect(runEdit(p, [{ op: 'update_room', roomId: 'tiny', poly: movedPoly(tiny, 2, [40, 40]) }]).errors[0].code).toBe('room-area-too-small');
+    expect(runEdit(p, [{ op: 'update_room', roomId: 'none', poly: square }]).errors.map(e => editMessages([e])[0])).toEqual(['找不到空間「none」']);
+  });
+  it('an outline edit keeps the label and the other fields of the room; delete removes only the room', () => {
+    const p = { ...withRooms([room('r1', square, { at: [500, 500], counted: false })]), furniture: [{ id: 'f1', type: 'sofa', name: '沙發', cx: 1000, cy: 1000, w: 800, d: 800, rot: 0 }] };
+    const moved = runEdit(p, [{ op: 'update_room', roomId: 'r1', poly: movedPoly(square, 2, [5000, 3000]) }]).plan.rooms[0];
+    expect([moved.at, moved.counted, moved.name, moved.mat]).toEqual([[500, 500], false, 'r1', 'wood']);
+    const deleted = runEdit(p, [{ op: 'delete_room', roomId: 'r1' }]).plan;
+    expect([deleted.rooms, deleted.furniture.length, deleted.materials]).toEqual([[], 1, p.materials]);
+    for (const values of [{ name: '客廳' }, { counted: true }]) expect(runEdit(p, [{ op: 'update_room', roomId: 'r1', ...values }]).status).toBe('ok');
+    expect(runEdit(p, [{ op: 'update_room', roomId: 'r1', mat: 'none' }]).errors[0].code).toBe('room-material-missing');
   });
 });
