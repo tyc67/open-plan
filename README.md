@@ -5,7 +5,7 @@ A local floor-plan editor (2D and 3D) that works on plan data, and a set of tool
 - **For a person:** give a floor-plan image to your own AI agent, let the agent write Open Plan JSON, import the file, then correct the scale and the geometry in the editor.
 - **For an agent:** a command line tool and a local MCP server validate, draw and change a plan file, and the editor in the browser shows the same file live.
 
-Status on 2026-10-11: Steps A to D of [`docs/plan-import-roadmap.md`](docs/plan-import-roadmap.md) are closed; Steps C and D have accepted exceptions, recorded there. **No public release is recorded:** this repository has no remote, the CLI package is private, and the names of the packages are not decided. Step E (a remote MCP server) is not started.
+Status on 2026-10-11: Steps A to D of [`docs/plan-import-roadmap.md`](docs/plan-import-roadmap.md) are closed; Steps C and D have accepted exceptions, recorded there. **The product stays local (the owner's decision, 2026-10-11); no public release is recorded:** this repository has no remote, the CLI package is private, and the names of the packages are not decided. Step E (a remote MCP server) is not started.
 
 ## Run
 
