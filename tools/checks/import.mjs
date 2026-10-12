@@ -40,6 +40,8 @@ try {
   const load = async entries => {
     await page.evaluate(e => { localStorage.clear(); for (const [k, v] of e) localStorage.setItem(k, v); }, entries);
     await page.reload(); await page.waitForSelector('svg.plan-svg'); await settle();
+    // On a busy computer the autosave at page load can be later than the fixed wait.
+    await page.waitForFunction(k => localStorage.getItem(k) !== null, KEY);
   };
   const dialog = page.locator('[role=dialog]');
   const undoSteps = () => page.evaluate(() => [...document.querySelectorAll('#history-content button')].filter(b => b.textContent.includes('步驟')).length);
