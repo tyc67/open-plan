@@ -3,7 +3,7 @@ import ErrorBoundary from '../ErrorBoundary.jsx';
 import { createEmptyPlan, createId, createSamplePlan, fitBounds, planGeometry, roomArea, validatePlan } from 'open-plan-core';
 import { RotateCw, Trash2 } from 'lucide-react';
 import WorkspaceShell from '../workspace/WorkspaceShell.jsx';
-import { PLAN_KEY, PlanChangedElsewhere, backupBeforeReplace, changedElsewhere, keepOverElsewhere, loadDocument, loadFromElsewhere, preserveUnreadableDocument, replacedDocument, saveDocument, sessionDocument } from './storage.js';
+import { PLAN_KEY, PlanChangedElsewhere, adoptElsewhere, backupBeforeReplace, changedElsewhere, readElsewhere, keepOverElsewhere, loadDocument, loadFromElsewhere, preserveUnreadableDocument, replacedDocument, saveDocument, sessionDocument } from './storage.js';
 import { readImportFile } from './planFile.js';
 import { createFileSync } from './fileSession.js';
 import { issueMessage } from './issueMessages.js';
@@ -269,8 +269,11 @@ export default function FloorPlanEditor({ fileSession = null }) {
   function clearTabConflict() { tabConflictNow.current = false; setTabConflict(null); }
   function saveToBrowser() {
     const plan = committedDoc.current;
-    try { saveDocument(plan); savedDoc.current = plan; setStatus('已儲存到此裝置'); setCanRestoreSession(!!sessionDocument()); return true; }
-    catch (error) { if (error instanceof PlanChangedElsewhere) showTabConflict(); else setStatus(`儲存失敗：${error.message}`); return false; }
+    // A plan that is already the saved one (the timer after a load from another tab, or a drag that stopped) keeps
+    // the status that is shown.
+    const already = plan === savedDoc.current;
+    try { saveDocument(plan); savedDoc.current = plan; if (!already) setStatus('已儲存到此裝置'); setCanRestoreSession(!!sessionDocument()); return true; }
+    catch (error) { if (error instanceof PlanChangedElsewhere) elsewhere.current(); else setStatus(`儲存失敗：${error.message}`); return false; }
   }
   useEffect(() => {
     if (!autosave.current) return;
@@ -294,9 +297,34 @@ export default function FloorPlanEditor({ fileSession = null }) {
     window.addEventListener('pagehide',hide);document.addEventListener('visibilitychange',visibility);window.addEventListener('storage',stored);
     return ()=>{window.removeEventListener('pagehide',hide);document.removeEventListener('visibilitychange',visibility);window.removeEventListener('storage',stored);};
   },[]);
-  // The stored plan is looked at again: the other tab can put the known text back, and then there is nothing to decide.
+  // Decides what a change from another tab needs. It runs for a `storage` event, a return to the page and a refused
+  // save, and it uses one reading of the stored plan for the whole decision.
+  //  - The known text is back: nothing to decide.
+  //  - The stored plan is equal to this tab's plan: it becomes the known one. Nothing is written or shown.
+  //  - This tab has nothing to lose (no edit that waits for a save, no gesture, draft or focused field, no import
+  //    dialog, autosave not paused): the stored plan is loaded as file mode loads a file version, with no undo step,
+  //    and the undo history starts again (an undo would write the old plan over the work of the other tab).
+  //  - Other cases, and stored data that was removed or cannot be opened: the notice, and the user decides.
+  // The compare is on JSON text, so plans that are equal with another key order count as not equal: then the plan is
+  // loaded or the notice shows, which is safe.
   const elsewhere=useRef(null);
-  elsewhere.current=()=>{if(changedElsewhere()){if(!tabConflictNow.current)showTabConflict();}else if(tabConflictNow.current){clearTabConflict();setSaveRequests(n=>n+1);}};
+  elsewhere.current=()=>{
+    if(!changedElsewhere()){if(tabConflictNow.current){clearTabConflict();setSaveRequests(n=>n+1);}return;}
+    const reading=readElsewhere(),mine=committedDoc.current;
+    if(reading.plan){
+      const same=JSON.stringify(reading.plan)===JSON.stringify(mine);
+      const clean=mine===savedDoc.current&&autosave.current&&!importState&&!editorForFile.current.busy();
+      if(same||clean){
+        // A v1 text that cannot be kept first is not adopted; the notice gives the reason.
+        try {adoptElsewhere(reading);} catch(error) {showTabConflict(`無法先備份舊格式的資料：${error.message}`);return;}
+        if(same)savedDoc.current=mine;
+        else {editorForFile.current.load(reading.plan);savedDoc.current=reading.plan;setCanRestore(!!replacedDocument());setCanRestoreSession(!!sessionDocument());setStatus('已載入另一個分頁的新版本');}
+        if(tabConflictNow.current)clearTabConflict();
+        return;
+      }
+    }
+    if(!tabConflictNow.current)showTabConflict();
+  };
   // 載入另一個分頁的版本: this tab's plan is kept first, then the stored plan is read again and replaces the open plan as
   // one undo step. A plan that cannot be opened, or a removed one, changes nothing.
   function loadOtherTab() {
@@ -326,9 +354,9 @@ export default function FloorPlanEditor({ fileSession = null }) {
   const editorForFile=useRef(null);
   editorForFile.current={
     latest:()=>committedDoc.current,
-    // A gesture, a 3D drag, a focused field or an open scaling: an external version would interrupt it, so it is a
-    // conflict instead.
-    busy:()=>!!(scalingOpen.current||wallDraft.current||wallGesture.current||openingGesture.current||roomGesture.current||roomDraft.current||drag.current||pan.current||measureGesture.current||view3d.current?.isDragging?.()||(document.activeElement instanceof HTMLElement&&document.activeElement.matches('input,textarea,select'))),
+    // A gesture, a 3D drag, a focused field, an open scaling or a measurement with only its first point: an external
+    // version would interrupt it, so it is a conflict instead.
+    busy:()=>!!(scalingOpen.current||wallDraft.current||wallGesture.current||openingGesture.current||roomGesture.current||roomDraft.current||drag.current||pan.current||measure.current||measureGesture.current||view3d.current?.isDragging?.()||(document.activeElement instanceof HTMLElement&&document.activeElement.matches('input,textarea,select'))),
     settle:()=>settleEditor(),
     // A file version replaces the open plan without an undo step, and the undo history starts again. A furniture or
     // label drag is dropped: its next move would put the plan from before the load back.
@@ -547,7 +575,7 @@ export default function FloorPlanEditor({ fileSession = null }) {
   useEffect(()=>{spaceHeld.current=false;setSpacePan(false);},[view]);
   function saveNow() {
     if(fileSync.current){fileSync.current.save();return;}
-    try {saveDocument(committedDoc.current);savedDoc.current=committedDoc.current;setStatus(autosave.current?'已儲存到此裝置':'已儲存到此裝置，自動儲存已恢復');autosave.current=true;setCanRestoreSession(!!sessionDocument());}catch(error){if(error instanceof PlanChangedElsewhere)showTabConflict();else setStatus(`儲存失敗：${error.message}`);}
+    try {saveDocument(committedDoc.current);savedDoc.current=committedDoc.current;setStatus(autosave.current?'已儲存到此裝置':'已儲存到此裝置，自動儲存已恢復');autosave.current=true;setCanRestoreSession(!!sessionDocument());}catch(error){if(error instanceof PlanChangedElsewhere)elsewhere.current();else setStatus(`儲存失敗：${error.message}`);}
   }
   function rename(name) {if(name!==doc.name)commit({...doc,name});}
   // An edit through the core commands (roadmap D4), on the newest plan: one undo step with its label, or no change

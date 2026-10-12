@@ -1,9 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { createSamplePlan } from 'open-plan-core';
 
-// Old finding L6, part 2: a save is refused when another tab changed the saved plan. Each test gets a new copy of the
+// Old finding L6, part 2: a save is refused when another tab changed the saved plan; the editor decides with one
+// reading of the other plan, which it can adopt. Each test gets a new copy of the
 // module, which is one tab; a second import of the module is a second tab on the same storage.
-const KEY = 'open-plan:document:v1', REPLACED = `${KEY}:replaced`, RECOVERY = `${KEY}:recovery`, SESSION = `${KEY}:session`;
+const KEY = 'open-plan:document:v1', REPLACED = `${KEY}:replaced`, RECOVERY = `${KEY}:recovery`, SESSION = `${KEY}:session`, BEFORE_V2 = `${KEY}:before-v2`;
 const store = new Map();
 let fail = null;
 globalThis.localStorage = {
@@ -135,6 +137,69 @@ describe('website storage with two tabs', () => {
     expect(() => a.loadFromElsewhere()).toThrow(a.PlanLoadError);
     expect(() => a.saveDocument(named(plan, 'x'))).toThrow(a.PlanChangedElsewhere);
     expect(store.get(KEY)).toBe('{broken');
+  });
+
+  it('a reading of the other plan changes nothing, and saves stay refused', async () => {
+    const a = await tab(), plan = createSamplePlan();
+    a.loadDocument(); a.saveDocument(plan);
+    store.set(KEY, JSON.stringify(named(plan, 'Other')));
+    const before = new Map(store), reading = a.readElsewhere();
+    expect(reading.plan.name).toBe('Other');
+    expect(new Map(store)).toEqual(before);
+    expect(a.changedElsewhere()).toBe(true);
+    expect(() => a.saveDocument(named(plan, 'x'))).toThrow(a.PlanChangedElsewhere);
+    store.delete(KEY);
+    expect(a.readElsewhere()).toEqual({ raw: null });
+    store.set(KEY, '{broken');
+    expect(a.readElsewhere().error).toBeInstanceOf(a.PlanLoadError);
+    expect(a.readElsewhere().plan).toBeUndefined();
+  });
+
+  it('an adopted reading: the equal plan is not written, in other bytes too, and an edit is written', async () => {
+    const a = await tab(), plan = createSamplePlan();
+    a.loadDocument(); a.saveDocument(named(plan, 'Edited'));           // this tab has written before
+    const mine = a.loadDocument().plan;
+    a.saveDocument(named(mine, 'Edited again'));
+    const other = JSON.stringify(named(mine, 'Other'), null, 2);       // other formatting than the editor writes
+    store.set(KEY, other);
+    const reading = a.readElsewhere();
+    expect(JSON.stringify(reading.plan)).toBe(JSON.stringify(named(mine, 'Other')));
+    a.adoptElsewhere(reading);
+    expect(a.changedElsewhere()).toBe(false);
+    a.saveDocument(reading.plan);
+    expect(store.get(KEY)).toBe(other);
+    a.saveDocument(named(reading.plan, 'After'));
+    expect(stored(KEY).name).toBe('After');
+  });
+
+  it('an adopted reading uses its own text: a change after the reading keeps saves refused', async () => {
+    const a = await tab(), plan = createSamplePlan();
+    a.loadDocument(); a.saveDocument(plan);
+    store.set(KEY, JSON.stringify(named(plan, 'Second')));
+    const reading = a.readElsewhere();
+    store.set(KEY, JSON.stringify(named(plan, 'Third')));              // another write between the reading and the adoption
+    a.adoptElsewhere(reading);
+    expect(a.changedElsewhere()).toBe(true);
+    expect(() => a.saveDocument(reading.plan)).toThrow(a.PlanChangedElsewhere);
+    expect(stored(KEY).name).toBe('Third');
+  });
+
+  it('a v1 plan from another tab: the reading keeps no copy; the adoption keeps the v1 text first', async () => {
+    const v1 = readFileSync(new URL('../../../packages/core/test/fixtures/export-v1-9e1715d.json', import.meta.url), 'utf8');
+    const a = await tab();
+    a.loadDocument(); a.saveDocument(createSamplePlan());
+    store.set(KEY, v1);
+    const reading = a.readElsewhere();
+    expect(reading.v1).toBe(true);
+    expect(store.has(BEFORE_V2)).toBe(false);
+    fail = BEFORE_V2;
+    expect(() => a.adoptElsewhere(reading)).toThrow();
+    expect(a.changedElsewhere()).toBe(true);
+    fail = null;
+    a.adoptElsewhere(reading);
+    expect(store.get(BEFORE_V2)).toBe(v1);
+    a.saveDocument(reading.plan);                                      // the migration write
+    expect(stored(KEY).schemaVersion).toBe(2);
   });
 
   it('one tab alone: the session copy and the saves work as before', async () => {

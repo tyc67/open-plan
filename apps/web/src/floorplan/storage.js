@@ -48,28 +48,54 @@ function checkSaved(plan) {
   if (!result.ok) throw new PlanLoadError(result.errors);
   return result;
 }
-/** The saved plan as { plan, warnings }, or null if nothing is saved. Throws PlanLoadError if it cannot be opened. */
-export function loadDocument() {
-  const raw = localStorage.getItem(KEY);
-  knownText = raw; knownPlan = null;
-  if (!raw) return null;
+// Reads a saved text as { plan, warnings, v1 }; throws PlanLoadError if it cannot be opened. It changes nothing, except
+// that `keepV1` (if given) runs for a v1 text before the migration.
+function readSaved(raw, keepV1) {
   let doc;
   try { doc = JSON.parse(raw); } catch { throw new PlanLoadError([{ path: '$', code: 'json-invalid', params: {} }]); }
   if (doc?.schemaVersion === 1) {
     const v1 = checkDocumentV1(doc);
     if (!v1.ok) throw new PlanLoadError(v1.errors);
-    // Keep the v1 data first; if it cannot be kept, do not migrate, so the next save cannot replace the only copy.
-    localStorage.setItem(BEFORE_V2_KEY, raw);
+    keepV1?.();
     const migrated = migrateV1Document(doc);
     if (!migrated.ok) throw new PlanLoadError(migrated.errors);
     const plan = migrated.plan;
     // A v1 plan can pass the v1 check and still give a v2 plan that v2 rejects (for example a wall thicker than 1000 mm).
     // Reject it now, so autosave never writes a plan that the next load cannot read.
     const { plan: checked, warnings } = checkSaved(plan);
-    return opened({ plan: checked, warnings }, true);
+    return { plan: checked, warnings, v1: true };
   }
   const { plan, warnings } = checkSaved(doc);
-  return opened({ plan: localizeLegacyNames(plan), warnings });
+  return { plan: localizeLegacyNames(plan), warnings, v1: false };
+}
+/** The saved plan as { plan, warnings }, or null if nothing is saved. Throws PlanLoadError if it cannot be opened. */
+export function loadDocument() {
+  const raw = localStorage.getItem(KEY);
+  knownText = raw; knownPlan = null;
+  if (!raw) return null;
+  // Keep the v1 data first; if it cannot be kept, do not migrate, so the next save cannot replace the only copy.
+  const { plan, warnings, v1 } = readSaved(raw, () => localStorage.setItem(BEFORE_V2_KEY, raw));
+  return opened({ plan, warnings }, v1);
+}
+/**
+ * One reading of the plan that another tab saved, for the editor to decide on: { raw, plan, warnings, v1 } if it can be
+ * opened; { raw: null } if it was removed; { raw, error } if it cannot be opened. It changes nothing in storage and
+ * nothing in this module.
+ */
+export function readElsewhere() {
+  const raw = localStorage.getItem(KEY);
+  if (!raw) return { raw: null };
+  try { return { raw, ...readSaved(raw) }; } catch (error) { if (!(error instanceof PlanLoadError)) throw error; return { raw, error }; }
+}
+/**
+ * Takes that reading as the saved plan that this tab knows: the editor shows its plan (or an equal one) and writes
+ * nothing. It uses the text of the reading and does not read storage again; if storage has another text by now, saves
+ * stay refused and the editor decides again. Throws if a v1 text cannot be kept first.
+ */
+export function adoptElsewhere(reading) {
+  if (reading.v1) localStorage.setItem(BEFORE_V2_KEY, reading.raw);
+  knownText = reading.raw;
+  opened({ plan: reading.plan }, reading.v1);
 }
 /**
  * Saves the plan. Until the plan differs from the one opened, nothing is written, so the saved bytes stay as they were.
