@@ -7,9 +7,10 @@ import { createSamplePlan } from 'open-plan-core';
 // module, which is one tab; a second import of the module is a second tab on the same storage.
 const KEY = 'open-plan:document:v1', REPLACED = `${KEY}:replaced`, RECOVERY = `${KEY}:recovery`, SESSION = `${KEY}:session`, BEFORE_V2 = `${KEY}:before-v2`;
 const store = new Map();
-let fail = null;
+let fail = null, afterRead = null;
 globalThis.localStorage = {
-  getItem: k => store.get(k) ?? null,
+  // `afterRead` runs one time after the next read: a write from another tab between a read and a write.
+  getItem: k => { const value = store.get(k) ?? null, run = afterRead; afterRead = null; run?.(); return value; },
   setItem: (k, v) => { if (fail === k) throw new Error('full'); store.set(k, String(v)); },
   removeItem: k => store.delete(k),
 };
@@ -17,7 +18,7 @@ const tab = async () => { vi.resetModules(); return import('../src/floorplan/sto
 const named = (plan, name) => ({ ...plan, name });
 const stored = key => JSON.parse(store.get(key));
 
-beforeEach(() => { store.clear(); fail = null; });
+beforeEach(() => { store.clear(); fail = null; afterRead = null; });
 
 describe('website storage with two tabs', () => {
   it('refuses a save after another tab wrote, and writes nothing', async () => {
@@ -200,6 +201,20 @@ describe('website storage with two tabs', () => {
     expect(store.get(BEFORE_V2)).toBe(v1);
     a.saveDocument(reading.plan);                                      // the migration write
     expect(stored(KEY).schemaVersion).toBe(2);
+  });
+
+  it('the recorded limit (no lock): a write between the read and the write of a save is overwritten, and that tab then sees it', async () => {
+    const a = await tab(), plan = createSamplePlan();
+    a.loadDocument(); a.saveDocument(plan);
+    const b = await tab(), opened = b.loadDocument().plan;
+    // Tab A writes after tab B read the stored text for its check and before tab B writes.
+    afterRead = () => a.saveDocument(named(plan, 'From A, at the same moment'));
+    b.saveDocument(named(opened, 'From B'));
+    expect(stored(KEY).name).toBe('From B');                           // the text of tab A is no longer in storage
+    expect(stored(SESSION).name).toBe(plan.name);                      // and the session copy is from before both
+    expect(b.changedElsewhere()).toBe(false);                          // tab B does not know
+    expect(a.changedElsewhere()).toBe(true);                           // tab A gets the notice at its next event or save
+    expect(() => a.saveDocument(named(plan, 'A again'))).toThrow(a.PlanChangedElsewhere);
   });
 
   it('one tab alone: the session copy and the saves work as before', async () => {
