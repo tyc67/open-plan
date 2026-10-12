@@ -106,7 +106,8 @@ export function createFileSync(session, editor, onChange) {
       if (version !== mine) return;                                   // a newer file state is shown; it decides
       if (r.status === 200) {
         // Edits made while the request was pending are not in the backup, so the file version must not replace them.
-        if (JSON.stringify(editor.latest()) !== sent) { show({ status: 'conflict', state: r.body.state, failed: '等待時又有新的修改，所以沒有載入；送出時的版本已備份' }); return; }
+        // A gesture that started during the wait is such an edit too: its preview is not in `latest()`.
+        if (JSON.stringify(editor.latest()) !== sent || editor.busy()) { show({ status: 'conflict', state: r.body.state, failed: '等待時又有新的修改，所以沒有載入；送出時的版本已備份' }); return; }
         editor.load(r.body.state.plan); accept(r.body.state.plan, r.body.state.revision); checkpointsDone = checkpointsAsked; show({ status: 'ok', loaded: true, backup: r.body.backup }); return;
       }
       if (r.status === 409 && r.body.code === 'REVISION_CONFLICT') { show({ status: 'conflict', state: r.body.state, refreshed: true }); return; }

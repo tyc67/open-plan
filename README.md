@@ -69,7 +69,7 @@ for c in serve mcp-serve scale walls openings-edit rooms-edit edit-gestures; do 
 
 # against a web server
 pnpm --filter open-plan-web exec vite preview --port 4319 --strictPort &
-for c in session demolition replace import validation openings bounds; do node tools/checks/$c.mjs http://localhost:4319/; done
+for c in session save-on-hide demolition replace import validation openings bounds; do node tools/checks/$c.mjs http://localhost:4319/; done
 ```
 
 Screenshots: `node tools/visual/capture.mjs <url> <out-dir>`, then `node tools/visual/compare.mjs <baseline-dir> <out-dir>`. The baselines are kept outside the repository.

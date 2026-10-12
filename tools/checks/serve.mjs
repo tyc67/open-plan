@@ -263,6 +263,49 @@ try {
   check('reconnect with an unsaved edit: 保留我的版本 writes the edit', (await until(() => cx(fileJson(), 'sample-f4') === 7777)) >= 0);
   await tab.close(); proxy.close();
 
+  // 12b. A drag that stops for longer than the autosave delay: its preview is not written to the file (old finding L6).
+  writeFileSync(plan, sampleText);
+  const held = await context.newPage(); let heldPuts = 0;
+  held.on('request', r => { if (r.method() === 'PUT' && r.url().endsWith('/api/plan')) heldPuts++; });
+  await held.goto(started.url); await held.waitForSelector('svg.plan-svg'); await sleep(800);
+  const heldStart = fileText(), heldBox = await held.locator('[data-furniture-id="sample-f2"]').boundingBox();
+  await held.mouse.move(heldBox.x + heldBox.width / 2, heldBox.y + heldBox.height / 2); await held.mouse.down();
+  await held.mouse.move(heldBox.x + heldBox.width / 2 + 40, heldBox.y + heldBox.height / 2 + 10, { steps: 3 });
+  await sleep(1000);
+  check('drag held: no write, and the file does not change', heldPuts === 0 && fileText() === heldStart, `${heldPuts} writes`);
+  await held.mouse.up();
+  check('drag released: the new position is written', (await until(() => cx(fileJson(), 'sample-f2') !== cx(JSON.parse(heldStart), 'sample-f2'))) >= 0);
+  await sleep(800);
+  const labelStart = fileText(), labelId = JSON.parse(labelStart).rooms[0].id, labelBox = await held.locator(`[data-room-label-id="${labelId}"]`).boundingBox(), labelPuts = heldPuts;
+  await held.mouse.move(labelBox.x + labelBox.width / 2, labelBox.y + labelBox.height / 2); await held.mouse.down();
+  await held.mouse.move(labelBox.x + labelBox.width / 2 + 40, labelBox.y + labelBox.height / 2 + 30, { steps: 3 });
+  await sleep(1000);
+  check('label drag held: no write, and the file does not change', heldPuts === labelPuts && fileText() === labelStart, `${heldPuts - labelPuts} writes`);
+  await held.mouse.up();
+  check('label drag released: the new position is written', (await until(() => String(fileJson().rooms[0].at) !== String(JSON.parse(labelStart).rooms[0].at))) >= 0);
+
+  // 12c. A drag that starts while 載入檔案版本 waits for the server: the file version is not loaded and not overwritten.
+  const heldNotice = () => held.locator('[data-file-notice="conflict"]');
+  const dragF2 = async () => {
+    const box = await held.locator('[data-furniture-id="sample-f2"]').boundingBox();
+    await held.mouse.move(box.x + box.width / 2, box.y + box.height / 2); await held.mouse.down();
+    await held.mouse.move(box.x + box.width / 2 + 40, box.y + box.height / 2 + 10, { steps: 3 });
+  };
+  await sleep(800); await dragF2();
+  apply([{ op: 'set_plan_name', name: 'Agent before a slow load' }]);
+  await until(async () => (await heldNotice().count()) === 1); await held.mouse.up();
+  let releaseLoad; const loadHeld = new Promise(done => { releaseLoad = done; });
+  await held.route('**/api/load-file', async route => { await loadHeld; await route.fallback(); });
+  await heldNotice().getByRole('button', { name: '載入檔案版本' }).click();
+  await sleep(200); await dragF2();
+  const slowRevision = revision();
+  releaseLoad(); await sleep(600);
+  check('drag during a slow 載入檔案版本: the load is refused with its reason', (await heldNotice().innerText()).includes('等待時又有新的修改'));
+  await held.mouse.up(); await sleep(1000);
+  check('drag during a slow 載入檔案版本: the file version is not overwritten', revision() === slowRevision && fileJson().name === 'Agent before a slow load', fileJson().name);
+  await held.unroute('**/api/load-file');
+  await held.close();
+
   // 13. Website mode on the same address shows the website indicator and has no access to the file.
   const website = await context.newPage();
   await website.goto(started.url.split('#')[0]); await website.waitForSelector('svg.plan-svg');

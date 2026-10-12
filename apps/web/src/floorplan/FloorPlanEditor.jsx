@@ -153,6 +153,12 @@ export default function FloorPlanEditor({ fileSession = null }) {
   const gridPad=Math.max(20000,3*Math.max(fitArea[2]-fitArea[0],fitArea[3]-fitArea[1]));
   const gridArea=[Math.floor((fitArea[0]-gridPad)/500)*500,Math.floor((fitArea[1]-gridPad)/500)*500,Math.ceil((fitArea[2]+gridPad)/500)*500,Math.ceil((fitArea[3]+gridPad)/500)*500];
   const drag = useRef(null);
+  // The last plan that is not a drag preview. A furniture or label drag puts its preview into `doc`, so every save
+  // (autosave, the save when the page hides, file mode) reads this one. It changes in step with each committed change,
+  // and not with a render, because a save can run between a cancelled drag and the next render.
+  // Limit: an edit from another path during such a drag is made from `doc`, so it commits the preview too.
+  const committedDoc=useRef(doc);
+  if(!drag.current)committedDoc.current=doc;
   const touchRoom=useRef(null);
   useTouchNavigation(svg,view,setViewport,()=>{
     touchRoom.current=null;cancelMeasure();
@@ -247,28 +253,51 @@ export default function FloorPlanEditor({ fileSession = null }) {
   const item = doc.furniture.find(f => f.id === selected);
   // Paused after a load error so the unreadable plan is not overwritten; a manual save resumes it.
   const autosave = useRef(!initial.error);
+  // The end of a drag commits the plan that is already in `doc` (its last preview), so `doc` does not change then. This
+  // count starts the autosave for it.
+  const [dragCommits,setDragCommits] = useState(0);
+  // The plan of the last successful website save; at page load, the opened plan. A committed plan that is not this one
+  // waits for a save. The plan at page load does not wait: the save when the page hides must not write a plan that the
+  // user did not edit. A failed save leaves the plan waiting, so the next hide tries again.
+  const savedDoc = useRef(doc);
+  function saveToBrowser() {
+    const plan = committedDoc.current;
+    try { saveDocument(plan); savedDoc.current = plan; setStatus('已儲存到此裝置'); setCanRestoreSession(!!sessionDocument()); }
+    catch (error) { setStatus(`儲存失敗：${error.message}`); }
+  }
   useEffect(() => {
     if (!autosave.current) return;
     const timer = setTimeout(() => {
       // File mode writes through the file session, which writes only when the plan differs from the file.
       if (fileSync.current) { fileSync.current.save(); return; }
-      try { saveDocument(doc); setStatus('已儲存到此裝置'); setCanRestoreSession(!!sessionDocument()); }
-      catch (error) { setStatus(`儲存失敗：${error.message}`); }
+      if (autosave.current) saveToBrowser();
     },400);
     return () => clearTimeout(timer);
-  },[doc]);
+  },[doc,dragCommits]);
+  // Website mode: the 400 ms delay must not lose the last edit when the page closes or goes to the background (old
+  // finding L6). The browser does not always send these events, so this is best effort. A drag preview and a typed
+  // value that is still in its field are not saved. File mode asks before the page closes instead.
+  const saveOnHide=useRef(null);
+  saveOnHide.current=()=>{if(autosave.current&&committedDoc.current!==savedDoc.current)saveToBrowser();};
+  useEffect(()=>{
+    if(fileSession)return;
+    const hide=()=>saveOnHide.current(),visibility=()=>{if(document.hidden)hide();};
+    window.addEventListener('pagehide',hide);document.addEventListener('visibilitychange',visibility);
+    return ()=>{window.removeEventListener('pagehide',hide);document.removeEventListener('visibilitychange',visibility);};
+  },[]);
   // ---- File mode (roadmap C3b) ----
   const fileSync=useRef(null);
   const [fileView,setFileView]=useState(()=>fileSession&&!fileSession.state.valid?{status:'invalid',state:fileSession.state}:{status:'ok'});
   const editorForFile=useRef(null);
   editorForFile.current={
-    latest:()=>latestDoc.current,
+    latest:()=>committedDoc.current,
     // A gesture, a 3D drag, a focused field or an open scaling: an external version would interrupt it, so it is a
     // conflict instead.
     busy:()=>!!(scalingOpen.current||wallDraft.current||wallGesture.current||openingGesture.current||roomGesture.current||roomDraft.current||drag.current||pan.current||measureGesture.current||view3d.current?.isDragging?.()||(document.activeElement instanceof HTMLElement&&document.activeElement.matches('input,textarea,select'))),
     settle:()=>settleEditor(),
-    // A file version replaces the open plan without an undo step, and the undo history starts again.
-    load:plan=>{swapPlanGeneration();cancelMeasure();setSnapGuides([]);setDoc(plan);latestDoc.current=plan;setHistory({past:[],future:[]});},
+    // A file version replaces the open plan without an undo step, and the undo history starts again. A furniture or
+    // label drag is dropped: its next move would put the plan from before the load back.
+    load:plan=>{swapPlanGeneration();cancelMeasure();setSnapGuides([]);drag.current=null;setDoc(plan);latestDoc.current=plan;committedDoc.current=plan;setHistory({past:[],future:[]});},
   };
   useEffect(()=>{
     if(!fileSession)return;
@@ -286,7 +315,7 @@ export default function FloorPlanEditor({ fileSession = null }) {
   },[]);
   function commit(next,before=doc) {
     setHistory(h => ({past:[...h.past.slice(-49),before],future:[]}));
-    setDoc(next);latestDoc.current=next;
+    setDoc(next);latestDoc.current=next;committedDoc.current=next;
   }
   // A focused field commits on blur, which the browser fires after pointerdown. Blur it first so a drag starts from the edited document.
   function commitPendingEdit(){
@@ -309,12 +338,12 @@ export default function FloorPlanEditor({ fileSession = null }) {
   function undo() {
     cancelMeasure();swapPlanGeneration();
     if(!history.past.length)return;
-    setDoc(history.past.at(-1)); setHistory({past:history.past.slice(0,-1),future:[doc,...history.future]});
+    setDoc(history.past.at(-1));latestDoc.current=committedDoc.current=history.past.at(-1); setHistory({past:history.past.slice(0,-1),future:[doc,...history.future]});
   }
   function redo() {
     cancelMeasure();swapPlanGeneration();
     if(!history.future.length)return;
-    setDoc(history.future[0]); setHistory({past:[...history.past,doc],future:history.future.slice(1)});
+    setDoc(history.future[0]);latestDoc.current=committedDoc.current=history.future[0]; setHistory({past:[...history.past,doc],future:history.future.slice(1)});
   }
   function point(e) {
     const p=new DOMPoint(e.clientX,e.clientY); return p.matrixTransform(svg.current.getScreenCTM().inverse());
@@ -429,7 +458,7 @@ export default function FloorPlanEditor({ fileSession = null }) {
     drag.current=null;setSnapGuides([]);
     if(svg.current.hasPointerCapture(e.pointerId)) svg.current.releasePointerCapture(e.pointerId);
     if(cancel) setDoc(g.before);
-    else {if(JSON.stringify(doc)!==JSON.stringify(g.before))commit(doc,g.before);if(g.touch){if(g.kind==='room-label')selectRoom(g.id);else selectFurniture(g.id);}}
+    else {if(JSON.stringify(doc)!==JSON.stringify(g.before)){commit(doc,g.before);setDragCommits(n=>n+1);}if(g.touch){if(g.kind==='room-label')selectRoom(g.id);else selectFurniture(g.id);}}
   }
   function add(entry) {
     if(layers.locked.furniture)return;
@@ -483,7 +512,7 @@ export default function FloorPlanEditor({ fileSession = null }) {
   useEffect(()=>{spaceHeld.current=false;setSpacePan(false);},[view]);
   function saveNow() {
     if(fileSync.current){fileSync.current.save();return;}
-    try {saveDocument(doc);setStatus(autosave.current?'已儲存到此裝置':'已儲存到此裝置，自動儲存已恢復');autosave.current=true;setCanRestoreSession(!!sessionDocument());}catch(error){setStatus(`儲存失敗：${error.message}`);}
+    try {saveDocument(committedDoc.current);savedDoc.current=committedDoc.current;setStatus(autosave.current?'已儲存到此裝置':'已儲存到此裝置，自動儲存已恢復');autosave.current=true;setCanRestoreSession(!!sessionDocument());}catch(error){setStatus(`儲存失敗：${error.message}`);}
   }
   function rename(name) {if(name!==doc.name)commit({...doc,name});}
   // An edit through the core commands (roadmap D4), on the newest plan: one undo step with its label, or no change
@@ -567,6 +596,7 @@ export default function FloorPlanEditor({ fileSession = null }) {
     cancelMeasure();setSnapGuides([]);touchRoom.current=null;
     for(const gesture of [drag.current,pan.current])if(gesture&&svg.current?.hasPointerCapture(gesture.pointerId))svg.current.releasePointerCapture(gesture.pointerId);
     if(drag.current){current=drag.current.before;setDoc(current);latestDoc.current=current;}
+    committedDoc.current=current;
     drag.current=null;pan.current=null;
     return current;
   }

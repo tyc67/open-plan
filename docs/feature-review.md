@@ -10,7 +10,7 @@ This review is from 2026-10-06, before Steps A to D of the roadmap. Its file nam
 | --- | --- | --- |
 | L1 | Open | The cut level in 3D is local state (`FloorPlan3D.jsx`, `cutLevel`), not stored. |
 | L3 | Needs repro | Not checked again. |
-| L6 | Open in website mode | No save on `pagehide`, and no sync or conflict check between two tabs. File mode (`serve`, Step C) asks before the page closes with unsaved edits, and has a conflict message for a change of the file. |
+| L6 | Partly corrected (2026-10-11) | Corrected: website mode saves a waiting edit when the page hides or closes (`pagehide`, `visibilitychange`), and autosave in both modes writes only committed data (before, a furniture or label drag that stopped for 400 ms stored its preview; check `tools/checks/save-on-hide.mjs`, and `serve.mjs` for file mode); a save that fails is tried again at the next hide. Limits: the browser does not always send these events, so the save at close is best effort; a typed value that is still in its field is not saved; an edit from another path during a furniture or label drag (for example a keyboard action while the pointer is down) is made from the plan with the preview, so that preview is then committed and saved (older behaviour, not changed). Still open: no sync and no conflict check between two tabs (the last tab to save wins with no warning). |
 | L7 | Partly corrected | The English save and load messages are gone. The hint of the measure tool still takes the place of the status line. |
 | L8 | Open | `startMeasure` checks only the lock of the dimensions layer, not if the layer is shown. |
 | L9 | Open | `containsPoint` (now in `packages/core/src/rooms.ts`) is true on an edge. |
