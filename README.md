@@ -32,7 +32,7 @@ node packages/cli/dist/cli.js serve plan.json
 - **2D and 3D:** the same plan in an SVG drawing and in a Three.js view. Walls are centre lines with a thickness; doors, windows, sliding doors and holes belong to a wall. Only horizontal and vertical walls are supported.
 - **Scale correction:** measure a known length, type its real value, and the plan is scaled.
 - **Editing:** walls (type, thickness, length, split, join, reverse, demolition mark, add, delete), openings (type, position, width, heights, hinge and swing, move to another wall, add, delete), rooms (outline points, name, floor material, add, delete), furniture, measurements, a cost estimate, undo and redo, and a history of the session.
-- **Storage:** website mode keeps one plan in the browser; file mode (`serve`) keeps the plan in a file on your computer, with backups beside it. Export and import move a plan between the modes.
+- **Storage:** website mode keeps one plan in the browser (when another tab changed the plan, a tab stops its saves and asks which plan to keep; there is no lock, so two tabs that write at almost the same moment can still overwrite, see L6 in [`docs/feature-review.md`](docs/feature-review.md)); file mode (`serve`) keeps the plan in a file on your computer, with backups beside it. Export and import move a plan between the modes.
 
 The user interface is in Traditional Chinese (zh-TW).
 
@@ -69,7 +69,7 @@ for c in serve mcp-serve scale walls openings-edit rooms-edit edit-gestures; do 
 
 # against a web server
 pnpm --filter open-plan-web exec vite preview --port 4319 --strictPort &
-for c in session save-on-hide demolition replace import validation openings bounds; do node tools/checks/$c.mjs http://localhost:4319/; done
+for c in session save-on-hide tabs demolition replace import validation openings bounds; do node tools/checks/$c.mjs http://localhost:4319/; done
 ```
 
 Screenshots: `node tools/visual/capture.mjs <url> <out-dir>`, then `node tools/visual/compare.mjs <baseline-dir> <out-dir>`. The baselines are kept outside the repository.

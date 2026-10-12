@@ -3,7 +3,7 @@ import ErrorBoundary from '../ErrorBoundary.jsx';
 import { createEmptyPlan, createId, createSamplePlan, fitBounds, planGeometry, roomArea, validatePlan } from 'open-plan-core';
 import { RotateCw, Trash2 } from 'lucide-react';
 import WorkspaceShell from '../workspace/WorkspaceShell.jsx';
-import { backupBeforeReplace, loadDocument, preserveUnreadableDocument, replacedDocument, saveDocument, sessionDocument } from './storage.js';
+import { PLAN_KEY, PlanChangedElsewhere, backupBeforeReplace, changedElsewhere, keepOverElsewhere, loadDocument, loadFromElsewhere, preserveUnreadableDocument, replacedDocument, saveDocument, sessionDocument } from './storage.js';
 import { readImportFile } from './planFile.js';
 import { createFileSync } from './fileSession.js';
 import { issueMessage } from './issueMessages.js';
@@ -254,37 +254,72 @@ export default function FloorPlanEditor({ fileSession = null }) {
   // Paused after a load error so the unreadable plan is not overwritten; a manual save resumes it.
   const autosave = useRef(!initial.error);
   // The end of a drag commits the plan that is already in `doc` (its last preview), so `doc` does not change then. This
-  // count starts the autosave for it.
-  const [dragCommits,setDragCommits] = useState(0);
+  // count starts the autosave for it. It also starts the autosave again when a conflict with another tab goes away
+  // with no decision: an edit from the time of the conflict still waits.
+  const [saveRequests,setSaveRequests] = useState(0);
   // The plan of the last successful website save; at page load, the opened plan. A committed plan that is not this one
   // waits for a save. The plan at page load does not wait: the save when the page hides must not write a plan that the
   // user did not edit. A failed save leaves the plan waiting, so the next hide tries again.
   const savedDoc = useRef(doc);
+  // Website mode: another tab changed the saved plan (old finding L6). Saves stop until the user decides; `failed` is
+  // the reason why the last decision did not finish.
+  const [tabConflict,setTabConflict] = useState(null);
+  const tabConflictNow = useRef(false);
+  function showTabConflict(failed) { tabConflictNow.current = true; setTabConflict({ failed }); setStatus('沒有儲存：另一個分頁已變更這個平面圖'); }
+  function clearTabConflict() { tabConflictNow.current = false; setTabConflict(null); }
   function saveToBrowser() {
     const plan = committedDoc.current;
-    try { saveDocument(plan); savedDoc.current = plan; setStatus('已儲存到此裝置'); setCanRestoreSession(!!sessionDocument()); }
-    catch (error) { setStatus(`儲存失敗：${error.message}`); }
+    try { saveDocument(plan); savedDoc.current = plan; setStatus('已儲存到此裝置'); setCanRestoreSession(!!sessionDocument()); return true; }
+    catch (error) { if (error instanceof PlanChangedElsewhere) showTabConflict(); else setStatus(`儲存失敗：${error.message}`); return false; }
   }
   useEffect(() => {
     if (!autosave.current) return;
     const timer = setTimeout(() => {
       // File mode writes through the file session, which writes only when the plan differs from the file.
       if (fileSync.current) { fileSync.current.save(); return; }
-      if (autosave.current) saveToBrowser();
+      if (autosave.current && !tabConflictNow.current) saveToBrowser();
     },400);
     return () => clearTimeout(timer);
-  },[doc,dragCommits]);
+  },[doc,saveRequests]);
   // Website mode: the 400 ms delay must not lose the last edit when the page closes or goes to the background (old
   // finding L6). The browser does not always send these events, so this is best effort. A drag preview and a typed
   // value that is still in its field are not saved. File mode asks before the page closes instead.
   const saveOnHide=useRef(null);
-  saveOnHide.current=()=>{if(autosave.current&&committedDoc.current!==savedDoc.current)saveToBrowser();};
+  saveOnHide.current=()=>{if(autosave.current&&!tabConflictNow.current&&committedDoc.current!==savedDoc.current)saveToBrowser();};
   useEffect(()=>{
     if(fileSession)return;
-    const hide=()=>saveOnHide.current(),visibility=()=>{if(document.hidden)hide();};
-    window.addEventListener('pagehide',hide);document.addEventListener('visibilitychange',visibility);
-    return ()=>{window.removeEventListener('pagehide',hide);document.removeEventListener('visibilitychange',visibility);};
+    const hide=()=>saveOnHide.current(),visibility=()=>{if(document.hidden)hide();else elsewhere.current();};
+    // A `storage` event comes only from other tabs. `key` is null when the other tab cleared all storage.
+    const stored=e=>{if(e.storageArea===localStorage&&(e.key===null||e.key===PLAN_KEY))elsewhere.current();};
+    window.addEventListener('pagehide',hide);document.addEventListener('visibilitychange',visibility);window.addEventListener('storage',stored);
+    return ()=>{window.removeEventListener('pagehide',hide);document.removeEventListener('visibilitychange',visibility);window.removeEventListener('storage',stored);};
   },[]);
+  // The stored plan is looked at again: the other tab can put the known text back, and then there is nothing to decide.
+  const elsewhere=useRef(null);
+  elsewhere.current=()=>{if(changedElsewhere()){if(!tabConflictNow.current)showTabConflict();}else if(tabConflictNow.current){clearTabConflict();setSaveRequests(n=>n+1);}};
+  // 載入另一個分頁的版本: this tab's plan is kept first, then the stored plan is read again and replaces the open plan as
+  // one undo step. A plan that cannot be opened, or a removed one, changes nothing.
+  function loadOtherTab() {
+    const current=settleEditor();
+    if(!changedElsewhere()){clearTabConflict();setSaveRequests(n=>n+1);return;}
+    try {backupBeforeReplace(current);} catch(error) {showTabConflict(`無法先備份這個分頁的平面圖：${error.message}`);return;}
+    setCanRestore(true);
+    let loaded;
+    try {loaded=loadFromElsewhere();} catch(error) {showTabConflict(`另一個分頁的版本無法開啟：${error.message}`);return;}
+    if(!loaded){showTabConflict('已儲存的平面圖已被移除，沒有可以載入的版本');return;}
+    clearSelection();commit(loaded.plan,current);savedDoc.current=loaded.plan;autosave.current=true;setPlanLoads(n=>n+1);clearTabConflict();
+    const count=loaded.warnings.length;
+    setStatus('已載入另一個分頁的版本');
+    setReplaceNotice({tone:count?'warning':'info',text:`已載入另一個分頁的版本。這個分頁原本的平面圖已備份。${count?`這個平面圖有 ${count} 個需要注意的地方，清單在「平面圖設定」。`:''}`,actions:[['復原上一個平面圖',restorePrevious]]});
+  }
+  // 保留這個分頁的版本: the plan of the other tab is kept first, then this tab's plan is written.
+  function keepThisTab() {
+    const current=settleEditor();
+    let kept;
+    try {kept=keepOverElsewhere(current);} catch(error) {showTabConflict(error.message);return;}
+    savedDoc.current=current;autosave.current=true;clearTabConflict();setCanRestore(!!replacedDocument());setCanRestoreSession(!!sessionDocument());
+    setStatus(kept==='replaced'?'已保留這個分頁的版本；另一個分頁的版本可以用「復原上一個平面圖」取回':kept==='recovery'?'已保留這個分頁的版本；另一個分頁的資料已另存備份':'已保留這個分頁的版本');
+  }
   // ---- File mode (roadmap C3b) ----
   const fileSync=useRef(null);
   const [fileView,setFileView]=useState(()=>fileSession&&!fileSession.state.valid?{status:'invalid',state:fileSession.state}:{status:'ok'});
@@ -458,7 +493,7 @@ export default function FloorPlanEditor({ fileSession = null }) {
     drag.current=null;setSnapGuides([]);
     if(svg.current.hasPointerCapture(e.pointerId)) svg.current.releasePointerCapture(e.pointerId);
     if(cancel) setDoc(g.before);
-    else {if(JSON.stringify(doc)!==JSON.stringify(g.before)){commit(doc,g.before);setDragCommits(n=>n+1);}if(g.touch){if(g.kind==='room-label')selectRoom(g.id);else selectFurniture(g.id);}}
+    else {if(JSON.stringify(doc)!==JSON.stringify(g.before)){commit(doc,g.before);setSaveRequests(n=>n+1);}if(g.touch){if(g.kind==='room-label')selectRoom(g.id);else selectFurniture(g.id);}}
   }
   function add(entry) {
     if(layers.locked.furniture)return;
@@ -512,7 +547,7 @@ export default function FloorPlanEditor({ fileSession = null }) {
   useEffect(()=>{spaceHeld.current=false;setSpacePan(false);},[view]);
   function saveNow() {
     if(fileSync.current){fileSync.current.save();return;}
-    try {saveDocument(committedDoc.current);savedDoc.current=committedDoc.current;setStatus(autosave.current?'已儲存到此裝置':'已儲存到此裝置，自動儲存已恢復');autosave.current=true;setCanRestoreSession(!!sessionDocument());}catch(error){setStatus(`儲存失敗：${error.message}`);}
+    try {saveDocument(committedDoc.current);savedDoc.current=committedDoc.current;setStatus(autosave.current?'已儲存到此裝置':'已儲存到此裝置，自動儲存已恢復');autosave.current=true;setCanRestoreSession(!!sessionDocument());}catch(error){if(error instanceof PlanChangedElsewhere)showTabConflict();else setStatus(`儲存失敗：${error.message}`);}
   }
   function rename(name) {if(name!==doc.name)commit({...doc,name});}
   // An edit through the core commands (roadmap D4), on the newest plan: one undo step with its label, or no change
@@ -666,13 +701,15 @@ export default function FloorPlanEditor({ fileSession = null }) {
     :fileView.status==='disconnected'?{tone:'error',kind:'disconnected',text:'與本機檔案的連線中斷。瀏覽器保留目前的平面圖，暫停寫入檔案，正在重新連線。',actions:[['下載目前平面圖',download]]}
     :fileView.status==='error'?{tone:'error',kind:'error',text:`無法寫入檔案（${fileView.message??fileView.code}）。瀏覽器保留目前的平面圖。`,actions:[['重試',()=>fileSync.current?.retry()],['下載目前平面圖',download]]}
     :null;
+  // Website mode: the same kind of state for a change from another tab.
+  const tabNotice=fileSession||!tabConflict?null:{tone:'warning',kind:'tab-conflict',text:`另一個分頁已變更這個平面圖，這個分頁已暫停儲存。${tabConflict.failed?`剛才的動作沒有完成（${tabConflict.failed}）。`:''}「載入另一個分頁的版本」會先備份這個分頁的平面圖；「保留這個分頁的版本」會先備份另一個分頁的版本。備份只保留最後一個，所有分頁共用。`,actions:[['載入另一個分頁的版本',loadOtherTab],['保留這個分頁的版本',keepThisTab]]};
   const planActions={
     onImportFile:importFile,importState,onConfirmImport:confirmImport,onCancelImport:closeImport,
     agentPrompt:AGENT_PROMPT,isEmpty:!doc.walls.length&&!doc.rooms.length&&!doc.furniture.length,
     onNewPlan:()=>replacePlan(createEmptyPlan(),'已建立新的空白平面圖。上一個平面圖已備份。'),
     onLoadSample:()=>replacePlan(createSamplePlan(),'已載入範例公寓。上一個平面圖已備份。'),
     onRestorePrevious:restorePrevious,canRestore,
-    notice:fileNotice??replaceNotice,onDismissNotice:()=>setReplaceNotice(null),
+    notice:fileNotice??tabNotice??replaceNotice,onDismissNotice:()=>setReplaceNotice(null),
     warnings:planWarnings,loadErrors:initial.loadErrors,
     storage:fileSession
       ?{kind:'file',label:`本機檔案模式 · ${fileSession.path}`,saveLabel:'儲存到檔案',help:`專案保存在你電腦上的檔案（${fileSession.path}）。每個瀏覽器工作階段第一次寫入前，以及每次取代或載入檔案版本前，舊的版本會存到檔案旁的備份資料夾。要換到網站版時，先匯出 JSON，再匯入。`}
