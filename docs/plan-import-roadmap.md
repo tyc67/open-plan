@@ -826,6 +826,8 @@ Forms:
 
 ## Step E: remote MCP server (later)
 
+**Status (the user, 2026-10-13): deferred.** Step E is not started and not removed. It stays deferred while the product stays local (the decision of 2026-10-11).
+
 **Goal:** chat-only agents can read and write a plan in the user's account, with no file copy.
 
 - Only after Open Plan has accounts and cloud storage. The donor project (`donor/mamezu/docs/remote-mcp.md`) shows a full design: Streamable HTTP, OAuth with PKCE, dynamic client registration, `expectedRevision` conflict checks and usage limits.
