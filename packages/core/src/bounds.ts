@@ -40,12 +40,106 @@ export function physicalBounds(plan: PlanV2): Rect | null {
 export function contentBounds(plan: PlanV2): Rect | null {
   const e = new Extent();
   addPhysical(plan, e);
-  for (const m of (plan.measurements ?? []) as Measurement[]) { e.add(m.a.x, m.a.y); e.add(m.b.x, m.b.y); }
-  for (const c of (plan.dimensions ?? []) as DimensionChain[]) {
-    const end = c.start + c.segments.reduce((sum, s) => sum + s, 0);
-    if (c.horizontal) { e.add(c.start, c.at); e.add(end, c.at); } else { e.add(c.at, c.start); e.add(c.at, end); }
+  // An annotation that the validator reports does not set the view (see `annotationReport`).
+  // A report with no index is about all annotations of a plan with no physical content: then no annotation sets the view.
+  const reports = annotationReport(plan), reported = new Set(reports.map(r => r.index === null ? r.list : `${r.list}[${r.index}]`));
+  (plan.measurements ?? []).forEach((m, i) => { if (!reported.has('measurements') && !reported.has(`measurements[${i}]`)) for (const [x, y] of measurementPoints(m as Measurement)) e.add(x, y); });
+  (plan.dimensions ?? []).forEach((c, i) => { if (!reported.has('dimensions') && !reported.has(`dimensions[${i}]`)) for (const [x, y] of chainPoints(c as DimensionChain)) e.add(x, y); });
+  if (usable(e.rect())) return e.rect();
+  // A box that is not finite cannot be a view: annotations very far from each other in a plan with no physical content,
+  // or physical content with such values. Then the physical content alone is used, or nothing (the default area).
+  const physical = physicalBounds(plan);
+  return usable(physical) ? physical : null;
+}
+/** A box, or no box, that a view can use: its corners and its size are finite. */
+const usable = (r: Rect | null) => !r || (r.every(Number.isFinite) && Number.isFinite(r[2] - r[0]) && Number.isFinite(r[3] - r[1]));
+
+// ---- Annotations (measurements and dimension chains) far from the plan ----
+
+/**
+ * How far an annotation can be from the physical content (walls, rooms, furniture), in mm. Outside `near` (or the
+ * longer side of the physical box, if that is more), an annotation is reported as a warning: it is possibly a unit
+ * error. Outside `far`, or with a value that is not finite, a strict check refuses it. With no physical content there
+ * is nothing to measure from: then the box around all annotations must be within `far` on each side.
+ */
+export const ANNOTATION_LIMITS = { near: 20_000, far: 100_000 } as const;
+
+const measurementPoints = (m: Measurement): Point[] => [[m.a.x, m.a.y], [m.b.x, m.b.y]];
+/** The start of a chain and the end of each segment. A file can have a negative length, so the last end is not always the farthest. */
+function chainPoints(c: DimensionChain): Point[] {
+  let pos = c.start;
+  const along = [pos, ...c.segments.map(s => (pos += s))];
+  return along.map((v): Point => c.horizontal ? [v, c.at] : [c.at, v]);
+}
+/**
+ * The largest value of a coordinate or a length that a drawing uses, in mm. A drawing adds, halves and multiplies
+ * its values (a centre, a rounding to 0.1 mm), and a value near the largest number gives a result that is not finite.
+ * Above this value a number also cannot hold 1 mm exactly. This is the one limit for the distance from 0: a plan that
+ * is moved as a whole stays valid at any smaller distance, and 1e15 mm is 1,000 million km.
+ */
+export const DRAWABLE_MAX = 1e15;
+/** An annotation can be drawn if each coordinate and each length is finite and not above `DRAWABLE_MAX`. */
+function drawable(points: Point[], lengths: number[]): boolean {
+  const fits = (v: number) => Math.abs(v) <= DRAWABLE_MAX;   // false for NaN and for a value that is not finite
+  for (const p of points) if (!fits(p[0]) || !fits(p[1])) return false;
+  for (const v of lengths) if (!fits(v)) return false;
+  return true;
+}
+const measurementDrawable = (m: Measurement) => drawable(measurementPoints(m), [Math.hypot(m.b.x - m.a.x, m.b.y - m.a.y)]);
+const chainDrawable = (c: DimensionChain) => drawable(chainPoints(c), c.segments);
+
+/**
+ * One reported annotation. `index` is null for the report about all annotations of a plan with no physical content.
+ * `level` near: a warning for every source. far: an error of a strict check. `distance` is how far outside the
+ * physical box the farthest point is (mm); for the report about all annotations, how much the longer side of their box
+ * is above the limit; null if the annotation cannot be drawn.
+ */
+export interface AnnotationReport { list: 'measurements' | 'dimensions'; index: number | null; level: 'near' | 'far'; drawable: boolean; distance: number | null; limit: number }
+
+/**
+ * The annotations that are too far from the plan. The validator makes its issues from this list and the 2D view
+ * leaves the same items out of "Fit", so the two cannot disagree. The plan must have valid fields.
+ * A physical box that is itself not finite gives no report: that is a separate, known gap.
+ */
+export function annotationReport(plan: Pick<PlanV2, 'walls' | 'rooms' | 'furniture' | 'measurements' | 'dimensions'>): AnnotationReport[] {
+  const items: { list: AnnotationReport['list']; index: number; points: Point[]; drawable: boolean }[] = [
+    ...((plan.measurements ?? []) as Measurement[]).map((m, index) => ({ list: 'measurements' as const, index, points: measurementPoints(m), drawable: measurementDrawable(m) })),
+    ...((plan.dimensions ?? []) as DimensionChain[]).map((c, index) => ({ list: 'dimensions' as const, index, points: chainPoints(c), drawable: chainDrawable(c) })),
+  ];
+  if (!items.length) return [];
+  const physical = new Extent();
+  addPhysical(plan as PlanV2, physical);
+  const box = physical.rect(), out: AnnotationReport[] = [];
+  const { near, far } = ANNOTATION_LIMITS;
+  for (const item of items) if (!item.drawable) out.push({ list: item.list, index: item.index, level: 'far', drawable: false, distance: null, limit: far });
+  const finite = items.filter(item => item.drawable);
+  if (!box) {
+    // No physical content: one report for each list that has an annotation, if the box around all of them is too large.
+    const all = new Extent();
+    for (const item of finite) for (const [x, y] of item.points) all.add(x, y);
+    const over = Math.max(all.x1 - all.x0, all.y1 - all.y0) - far;
+    if (finite.length && over > 0)
+      for (const list of ['measurements', 'dimensions'] as const) if (finite.some(item => item.list === list)) out.push({ list, index: null, level: 'far', drawable: true, distance: over, limit: far });
+    return out;
   }
-  return e.rect();
+  const side = Math.max(box[2] - box[0], box[3] - box[1]);
+  if (!Number.isFinite(side)) return out;
+  const nearLimit = Math.max(near, side);
+  for (const item of finite) {
+    let distance = 0;                                           // a loop: a chain can have more points than a call can have arguments
+    for (const [x, y] of item.points) distance = Math.max(distance, box[0] - x, x - box[2], box[1] - y, y - box[3]);
+    if (distance > far) out.push({ list: item.list, index: item.index, level: 'far', drawable: true, distance, limit: far });
+    else if (distance > nearLimit) out.push({ list: item.list, index: item.index, level: 'near', drawable: true, distance, limit: nearLimit });
+  }
+  return out;
+}
+
+/** The measurements and dimension chains that can be drawn: one with a value or a length that is not finite is left out. */
+export function drawableAnnotations<M, D>(plan: { measurements?: M[]; dimensions?: D[] }): { measurements: M[]; dimensions: D[] } {
+  return {
+    measurements: (plan.measurements ?? []).filter(m => measurementDrawable(m as unknown as Measurement)),
+    dimensions: (plan.dimensions ?? []).filter(c => chainDrawable(c as unknown as DimensionChain)),
+  };
 }
 
 /** The area that "Fit" shows in 2D: content bounds plus, on each side, 10% of that axis or 500 mm, whichever is larger. */

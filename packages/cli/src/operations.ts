@@ -203,7 +203,7 @@ export async function create(file: string, { sample = false, replace = false } =
   }, opts);
 }
 
-type Converted = { ok: true; plan: PlanV2; report: MigrationNote[] } | { ok: false; code: string; message: string; errors?: Issue[]; migrationReport?: MigrationNote[]; notices: string[] };
+type Converted = { ok: true; plan: PlanV2; report: MigrationNote[]; warnings: Issue[] } | { ok: false; code: string; message: string; errors?: Issue[]; migrationReport?: MigrationNote[]; notices: string[] };
 
 /** Converts v1 bytes to a v2 plan with the A1 rules and validates the result strictly. */
 function convertV1(bytes: Buffer, source: string): Converted {
@@ -213,7 +213,8 @@ function convertV1(bytes: Buffer, source: string): Converted {
   if (!migrated.ok) return { ok: false, code: 'VALIDATION_FAILED', message: `${source} cannot be migrated.`, errors: migrated.errors, migrationReport: migrated.report, notices: [] };
   const checked = validatePlan(migrated.plan, 'import');
   if (!checked.ok) return { ok: false, code: 'VALIDATION_FAILED', message: `The migrated plan has ${checked.errors.length} error(s); nothing was written.`, errors: checked.errors, migrationReport: migrated.report, notices: [] };
-  return { ok: true, plan: checked.plan!, report: migrated.report };
+  // The strict check has warnings also: the issues that are a warning for every source.
+  return { ok: true, plan: checked.plan!, report: migrated.report, warnings: checked.warnings };
 }
 
 const HEX64 = /^[0-9a-f]{64}$/;
@@ -229,7 +230,7 @@ const conflict = (currentRevision: string | null) => ({
  * `expectedRevision` (MCP) replaces `replace`: an existing destination is replaced only if its revision matches, and a
  * missing destination is then a conflict, not a creation.
  */
-export async function migrate(source: string, destination: string, { replace = false, expectedRevision }: { replace?: boolean; expectedRevision?: string } = {}, opts: OpOptions = {}): Promise<Result<{ revision: string; backup: string | null; migrationReport: MigrationNote[] }>> {
+export async function migrate(source: string, destination: string, { replace = false, expectedRevision }: { replace?: boolean; expectedRevision?: string } = {}, opts: OpOptions = {}): Promise<Result<{ revision: string; backup: string | null; migrationReport: MigrationNote[]; warnings: Issue[] }>> {
   if (expectedRevision !== undefined && !HEX64.test(expectedRevision)) return revisionRequired('to replace the destination');
   const inPlace = (await canonicalPath(source, true)) === (await canonicalPath(destination, false));
   const separate = inPlace ? null : convertV1(await readPlanBytes(source, opts), source);
@@ -239,11 +240,11 @@ export async function migrate(source: string, destination: string, { replace = f
     if (expectedRevision !== undefined && (current === null || revisionOf(current) !== expectedRevision)) return conflict(current && revisionOf(current));
     const converted = separate ?? convertV1(current!, source);
     if (!converted.ok) return converted;
-    if (!current) return { ...await createPlan(plan, destination, planText(converted.plan)), migrationReport: converted.report, notices: [] };
+    if (!current) return { ...await createPlan(plan, destination, planText(converted.plan)), migrationReport: converted.report, warnings: converted.warnings, notices: [] };
     if (!replace && expectedRevision === undefined) return exists(destination);
     const notices: string[] = [];
     const written = await replacePlan(plan, current, planText(converted.plan), notices);
-    return { ok: true, ...written, migrationReport: converted.report, notices };
+    return { ok: true, ...written, migrationReport: converted.report, warnings: converted.warnings, notices };
   }, opts);
 }
 

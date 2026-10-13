@@ -69,6 +69,8 @@ const TEXT = {
   'opening-type-unchanged': () => '類型沒有改變',
   'room-missing': p => `找不到空間「${p.roomId}」`,
   'opening-missing': p => `找不到開口「${p.openingId}」`,
+  'annotation-far-from-plan': p => `離平面圖 ${(p.distance / 1000).toFixed(1)} m，超過 ${(p.limit / 1000).toFixed(0)} m；請確認單位。「顯示整張平面圖」不包含這一項`,
+  'annotation-out-of-range': p => p.finite === false ? '數值太大，無法繪製；請刪除或修正（尺寸鏈用 set_dimensions）' : p.all ? `量測與尺寸鏈的範圍超過 ${(p.limit / 1000).toFixed(0)} m；請刪除或修正` : `離平面圖 ${(p.distance / 1000).toFixed(1)} m，超過 ${(p.limit / 1000).toFixed(0)} m；請刪除或修正（尺寸鏈用 set_dimensions）。「顯示整張平面圖」不包含這一項`,
   'plan-too-large': p => `平面圖 ${(p.width / 1000).toFixed(1)} × ${(p.depth / 1000).toFixed(1)} m，超過 ${p.limit / 1000} × ${p.limit / 1000} m`,
 };
 

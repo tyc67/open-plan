@@ -1,3 +1,4 @@
+import { annotationReport } from '../bounds.js';
 import type { DimensionChain, OpeningV2, PlanV2, Point, WallV2 } from '../types.js';
 import { validatePlan, type Issue } from '../validate.js';
 import { DIMENSION_REACH } from './plan.js';
@@ -68,6 +69,19 @@ function dimensionIssues(before: PlanV2, after: PlanV2): Issue[] {
   return issues;
 }
 
+/**
+ * The annotations (measurements and dimension chains) that the scaling puts at the far level of the validator, or
+ * moves farther out at that level. The limits are fixed lengths and do not scale with the plan, so a larger plan can
+ * have an annotation outside them. The near level is not here: it is a warning of the result, not a refusal.
+ */
+function annotationIssues(before: PlanV2, after: PlanV2): Issue[] {
+  const was = new Map(annotationReport(before).filter(r => r.level === 'far').map(r => [`${r.list}[${r.index}]`, r]));
+  return annotationReport(after).filter(r => r.level === 'far').filter(r => {
+    const old = was.get(`${r.list}[${r.index}]`);
+    return !old || r.distance === null || old.distance === null || r.distance > old.distance;
+  }).map(r => ({ path: r.index === null ? r.list : `${r.list}[${r.index}]`, code: 'annotation-out-of-range', params: { distance: r.distance, limit: r.limit, finite: r.drawable, all: r.index === null } }));
+}
+
 function scale(plan: PlanV2, c: Extract<PlanCommand, { op: 'scale_plan' }>): Step {
   let factor: number, pivot: Point;
   if (Object.hasOwn(c, 'factor')) {
@@ -86,7 +100,7 @@ function scale(plan: PlanV2, c: Extract<PlanCommand, { op: 'scale_plan' }>): Ste
   // D3: the scaling is refused with no change if the result has errors. A plan larger than the size limit counts as an
   // error here, although the validator only warns about it in a saved plan.
   const result = validatePlan(next, 'saved');
-  const issues = [...result.errors, ...result.warnings.filter(w => w.code === 'plan-too-large'), ...dimensionIssues(plan, next)];
+  const issues = [...result.errors, ...result.warnings.filter(w => w.code === 'plan-too-large'), ...dimensionIssues(plan, next), ...annotationIssues(plan, next)];
   if (issues.length) refuse(null, 'scale-result-invalid', { factor, issues: issues.slice(0, 20), count: issues.length });
   return { plan: next, notes: [{ code: 'plan-scaled', params: { factor, pivot } }] };
 }

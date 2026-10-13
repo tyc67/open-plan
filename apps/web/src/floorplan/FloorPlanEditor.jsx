@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import ErrorBoundary from '../ErrorBoundary.jsx';
-import { createEmptyPlan, createId, createSamplePlan, fitBounds, planGeometry, roomArea, roomLabelPoint, validatePlan } from 'open-plan-core';
+import { createEmptyPlan, createId, createSamplePlan, drawableAnnotations, fitBounds, planGeometry, roomArea, roomLabelPoint, validatePlan } from 'open-plan-core';
 import { RotateCw, Trash2 } from 'lucide-react';
 import WorkspaceShell from '../workspace/WorkspaceShell.jsx';
 import { PLAN_KEY, PlanChangedElsewhere, adoptElsewhere, backupBeforeReplace, changedElsewhere, readElsewhere, keepOverElsewhere, loadDocument, loadFromElsewhere, preserveUnreadableDocument, replacedDocument, saveDocument, sessionDocument } from './storage.js';
@@ -699,6 +699,8 @@ export default function FloorPlanEditor({ fileSession = null }) {
   }
   // Tolerable issues of the open plan, checked again after each change, so the list is never out of date.
   const planWarnings=useMemo(()=>validatePlan(doc,'saved').warnings,[doc]);
+  // A measurement or a chain with a value or a length that is not finite is not drawn; the warnings name it.
+  const drawn=useMemo(()=>drawableAnnotations(doc),[doc]);
   // Import (roadmap B3): read and check the file, show the summary or the errors, and replace only after confirmation.
   const IMPORT_MAX_BYTES=20*1024*1024;
   const [importState,setImportState]=useState(null);
@@ -776,8 +778,8 @@ export default function FloorPlanEditor({ fileSession = null }) {
         {markedWall&&view==='2d'&&<g className="selected-wall-ends" pointerEvents="none">{[['a',markedWall.a],['b',markedWall.b]].map(([key,p])=><g key={key} data-wall-end-mark={key}><circle cx={p[0]} cy={p[1]} r={9*ratio*25.4/96} fill="#f59e0b" stroke="#fff" strokeWidth="1.5" vectorEffect="non-scaling-stroke"/><text x={p[0]} y={p[1]} fontSize={12*ratio*25.4/96} fontWeight="700" textAnchor="middle" dominantBaseline="central" fill="#fff">{key}</text></g>)}</g>}
         {wallPreview&&<line data-wall-preview x1={wallPreview.a[0]} y1={wallPreview.a[1]} x2={wallPreview.b[0]} y2={wallPreview.b[1]} stroke="#2563eb" strokeOpacity=".45" strokeWidth={newWallThickness(doc,wallPreview.a)} pointerEvents="none"/>}
         <SnapGuides guides={snapGuides} unit={unit} ratio={ratio}/>
-        <Measurements selectedId={selectedMeasurement} onSelect={selectMeasurement} selectable={tool==='select'&&!spacePan&&!layers.locked.dimensions} measurements={layers.dimensions?doc.measurements:[]} preview={measurePreview} snapPoint={measurementSnap} unit={unit} ratio={ratio}/>
-        {layers.dimensions&&<DimensionLines chains={doc.dimensions} unit={unit}/>}
+        <Measurements selectedId={selectedMeasurement} onSelect={selectMeasurement} selectable={tool==='select'&&!spacePan&&!layers.locked.dimensions} measurements={layers.dimensions?drawn.measurements:[]} preview={measurePreview} snapPoint={measurementSnap} unit={unit} ratio={ratio}/>
+        {layers.dimensions&&<DimensionLines chains={drawn.dimensions} unit={unit}/>}
         {doc.rooms.map(r=>{
           const area=roomArea(r.poly),at=roomLabelPoint(r);
           const halo={stroke:'#fbf9f4',strokeWidth:45,paintOrder:'stroke',strokeLinejoin:'round'};

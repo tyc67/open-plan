@@ -397,7 +397,9 @@ Replaces all dimension chains of the plan (note `dimensions-set`, with the numbe
     - `start`: where the first segment starts: an x for a horizontal chain, a y for a vertical one.
     - `segments`: 1 or more lengths, each more than 0, one after the other from `start`. The drawing shows each length as a number.
 
-Refused: `dimension-no-segments`, `size-not-positive` (a length of 0 or less), `value-out-of-range` (`at`, `start` or the end of a segment is more than 1 000 000 mm from 0). The path names the value, for example `commands[0].dimensions[1].segments[0]`.
+Refused: `dimension-no-segments`, `size-not-positive` (a length of 0 or less), `value-out-of-range` (`at`, `start` or the end of a segment is more than 1 000 000 mm from 0; the path names the value, for example `commands[0].dimensions[1].segments[0]`), `annotation-out-of-range` (a chain is more than 100 m outside the walls, rooms and furniture; in a plan with none of these, the box around all chains is more than 100 m on a side).
+
+A chain that is more than 20 m outside the walls, rooms and furniture (or more than the longer side of their box, if that is more) is accepted with the warning `annotation-far-from-plan`: check the unit of your lengths.
 
 Draw the plan with its dimension chains to check them. Do not invent a length: a chain repeats lengths of the plan, it does not correct them.
 
@@ -419,7 +421,7 @@ A command with `factor` is read in the first form; a command without it, in the 
 
 Wall ends and thicknesses, openings along their walls, rooms, furniture positions, measurements and dimension chains scale. Furniture sizes, heights, door hinge and swing, materials and prices do not. Results are rounded to 0.1 mm. The note `plan-scaled` gives the factor and the pivot.
 
-Refused: `size-not-positive`, `scale-points-same`, `scale-result-invalid` (the scaled plan would have errors, or be larger than 100 × 100 m, or a dimension chain would go more than 1 000 000 mm from 0 or get a length of 0).
+Refused: `size-not-positive`, `scale-points-same`, `scale-result-invalid` (the scaled plan would have errors, or be larger than 100 × 100 m, or a dimension chain would go more than 1 000 000 mm from 0 or get a length of 0). The issue `annotation-out-of-range` in that list means that a measurement or a dimension chain would be more than 100 m outside the walls, rooms and furniture, when it was not before, or farther than before; these limits are fixed lengths and do not scale with the plan. No command changes a measurement: if a measurement of the plan is already that far away, a larger scale is refused until the user deletes that measurement in the editor (or it is removed from the file).
 
 ```json
 [{ "op": "scale_plan", "factor": 1.05, "pivot": [0, 0] }]

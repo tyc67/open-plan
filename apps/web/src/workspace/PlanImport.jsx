@@ -75,6 +75,10 @@ export function ImportDialog({state,onConfirm,onCancel}) {
           <dt>家具</dt><dd>{result.summary.furniture} 件</dd>
           <dt>大小</dt><dd>{metres(result.summary.width)} × {metres(result.summary.depth)}</dd>
         </dl>}
+        {result.ok&&result.warnings?.length>0&&<div data-import-warnings>
+          <p>需要注意 {result.warnings.length} 項。仍然可以匯入。</p>
+          <ul className="mt-2 space-y-1 text-amber-800 dark:text-amber-200">{issueMessages(result.warnings).map((line,i)=><li key={i}>{line}</li>)}</ul>
+        </div>}
         {!result.ok&&<div data-import-errors>
           <p>共 {result.errors.length} 個問題，目前的平面圖沒有改變。可把錯誤訊息貼給 AI 助理修正。</p>
           <ul className="mt-2 space-y-1 text-red-700 dark:text-red-300">{errorLines.map((line,i)=><li key={i}>{line}</li>)}</ul>

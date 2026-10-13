@@ -1,3 +1,4 @@
+import { annotationReport } from '../bounds.js';
 import { CEILING_MAX, CEILING_MIN } from '../heights.js';
 import type { DimensionChain, Material, PlanV2 } from '../types.js';
 import { PLAN_LIMITS } from '../validate.js';
@@ -70,6 +71,10 @@ function setDimensions(plan: PlanV2, c: Extract<PlanCommand, { op: 'set_dimensio
     }
     dimensions.push({ horizontal: d.horizontal as boolean, at: d.at as number, start: d.start as number, segments });
   }
+  // A new chain must not be at the far level of the validator (a strict check would refuse the file). Measurements
+  // are left out here, so an old measurement of the plan cannot make the new chains wrong.
+  const far = annotationReport({ ...plan, measurements: [], dimensions }).find(r => r.level === 'far');
+  if (far) refuse(far.index === null ? 'dimensions' : `dimensions[${far.index}]`, 'annotation-out-of-range', { distance: far.distance, limit: far.limit, finite: far.drawable, all: far.index === null });
   return { plan: { ...plan, dimensions }, notes: [{ code: 'dimensions-set', params: { before: plan.dimensions?.length ?? 0, after: dimensions.length } }] };
 }
 

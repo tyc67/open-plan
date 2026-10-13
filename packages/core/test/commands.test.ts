@@ -438,7 +438,9 @@ describe('set_dimensions', () => {
     expect(one({ ...chain, at: -1_000_001 })).toMatchObject({ path: 'commands[0].dimensions[0].at', code: 'value-out-of-range' });
     expect(one({ ...chain, start: 1_000_001 })).toMatchObject({ path: 'commands[0].dimensions[0].start', code: 'value-out-of-range' });
     expect(one({ ...chain, start: 999_000, segments: [500, 501] })).toMatchObject({ path: 'commands[0].dimensions[0].segments[1]', code: 'value-out-of-range' });
-    expect(ok([{ op: 'set_dimensions', dimensions: [{ ...chain, at: 1_000_000, start: -1_000_000, segments: [2_000_000] }] }]).plan.dimensions).toHaveLength(1);
+    // At the edge of the reach, in a plan with no walls (there the chains can be anywhere, but their box is 100 m at most).
+    expect(ok([{ op: 'set_dimensions', dimensions: [{ ...chain, at: 1_000_000, start: 900_000, segments: [100_000] }] }], createEmptyPlan('e')).plan.dimensions).toHaveLength(1);
+    expect(refused([{ op: 'set_dimensions', dimensions: [{ ...chain, at: 1_000_000, start: 800_000, segments: [100_001] }] }], createEmptyPlan('e'))).toMatchObject({ path: 'commands[0].dimensions', code: 'annotation-out-of-range' });
     // JSON has no list with a hole, but a caller of the core can make one.
     expect(refused([{ op: 'set_dimensions', dimensions: new Array(1) }])).toMatchObject({ path: 'commands[0].dimensions[0]', code: 'type-invalid' });
     const holes = new Array(2); holes[1] = 100;
@@ -450,11 +452,12 @@ describe('set_dimensions', () => {
   it('scale_plan refuses a result with a chain out of reach or with a length of 0 (found in a review)', () => {
     // Each scaled length is finite, but the end of the chain is not.
     const empty = createEmptyPlan('e');                              // no wall: only the chains can stop the scaling
-    const long = { op: 'set_dimensions', dimensions: [{ horizontal: true, at: 0, start: 0, segments: Array(100).fill(10000) }] };
-    const far = refused([long, { op: 'scale_plan', factor: 1e303, pivot: [0, 0] }], empty);
+    // A chain of 1000 m is from a file: set_dimensions refuses it (the far level of the validator).
+    const long = { ...empty, dimensions: [{ horizontal: true, at: 0, start: 0, segments: Array(100).fill(10000) }] };
+    const far = refused([{ op: 'set_plan_name', name: 'n' }, { op: 'scale_plan', factor: 1e303, pivot: [0, 0] }], long);
     expect(far).toMatchObject({ commandIndex: 1, code: 'scale-result-invalid' });
     expect((far.params.issues as CommandIssue[])[0]).toMatchObject({ path: 'dimensions[0]', code: 'value-out-of-range' });
-    expect((refused([long, { op: 'scale_plan', factor: 1.01, pivot: [0, 0] }], empty).params.issues as CommandIssue[])[0].path).toBe('dimensions[0]');
+    expect((refused([{ op: 'scale_plan', factor: 1.01, pivot: [0, 0] }], long).params.issues as CommandIssue[])[0].path).toBe('dimensions[0]');
     const small = { op: 'set_dimensions', dimensions: [{ ...chain, segments: [3000, 0.4] }] };
     const zero = refused([small, { op: 'scale_plan', factor: 0.1, pivot: [0, 0] }], empty);
     expect((zero.params.issues as CommandIssue[])[0]).toMatchObject({ path: 'dimensions[0].segments[1]', code: 'size-not-positive' });
@@ -462,12 +465,35 @@ describe('set_dimensions', () => {
     const loose = { ...empty, dimensions: [{ horizontal: true, at: 0, start: 0, segments: [3_000_000, 0] }] };
     expect(ok([{ op: 'scale_plan', factor: 0.5, pivot: [0, 0] }], loose).plan.dimensions![0].segments).toEqual([1_500_000, 0]);
     expect(refused([{ op: 'scale_plan', factor: 1.5, pivot: [0, 0] }], loose).code).toBe('scale-result-invalid');
+    // With no physical content, the box around the annotations is the measure: the two-point form with the same distance changes nothing.
+    const box = { ...empty, measurements: [{ id: 'm', a: { x: 0, y: 0 }, b: { x: 150_000, y: 0 } }] };
+    expect(ok([{ op: 'scale_plan', a: [0, 0], b: [150_000, 0], distance: 150_000 }], box).plan.measurements![0].b.x).toBe(150_000);
+    expect(ok([{ op: 'scale_plan', factor: 0.5, pivot: [0, 0] }], box).warnings).toEqual([]);
+    expect((refused([{ op: 'scale_plan', factor: 1.1, pivot: [0, 0] }], box).params.issues as CommandIssue[])[0]).toMatchObject({ path: 'measurements', code: 'annotation-out-of-range' });
     // A chain of a file that is already not finite stays refused when the scaled result is not finite: "no worse" is for finite values.
     const overflow = { ...empty, dimensions: [{ horizontal: true, at: 0, start: 0, segments: Array(100).fill(1e307) }] };
     expect((refused([{ op: 'scale_plan', factor: 0.5, pivot: [0, 0] }], overflow).params.issues as CommandIssue[])[0]).toMatchObject({ path: 'dimensions[0]', code: 'value-out-of-range' });
     // A negative length of a file: an end in the middle of the chain counts, not only the last end.
     const back = { ...empty, dimensions: [{ horizontal: true, at: 0, start: 0, segments: [900_000, -900_000] }] };
     expect(refused([{ op: 'scale_plan', factor: 1.2, pivot: [0, 0] }], back).code).toBe('scale-result-invalid');
+  });
+  it('a new chain far from the plan: a warning at the near level, a refusal at the far level; scale_plan follows the same levels', () => {
+    // base() is a plan of 8 m. Near level: more than 20 m outside its walls. Far level: more than 100 m outside.
+    const at = (y: number) => [{ op: 'set_dimensions', dimensions: [{ ...chain, at: y }] }];
+    expect(ok(at(-600)).warnings.filter(w => w.code.startsWith('annotation'))).toEqual([]);
+    expect(ok(at(-30_000)).warnings.filter(w => w.code.startsWith('annotation'))).toMatchObject([{ commandIndex: 0, path: 'dimensions[0]', code: 'annotation-far-from-plan' }]);
+    expect(refused(at(-150_000))).toMatchObject({ path: 'commands[0].dimensions[0]', code: 'annotation-out-of-range', params: { limit: 100_000, finite: true } });
+    // An old measurement of the plan that is far away does not make a new chain wrong.
+    const old = { ...base(), measurements: [{ id: 'm', a: { x: 0, y: 0 }, b: { x: 500_000, y: 0 } }] };
+    expect(ok(at(-600), old).plan.dimensions).toHaveLength(1);
+    // The limits are fixed lengths: a scaling can move an annotation over them. Near: a warning. Far: refused, if new or worse.
+    const measured = (x: number) => ({ ...base(), measurements: [{ id: 'm', a: { x: 0, y: 0 }, b: { x, y: 0 } }] });
+    expect(ok([{ op: 'scale_plan', factor: 2, pivot: [0, 0] }], measured(20_000)).warnings.map(w => w.code)).toContain('annotation-far-from-plan');
+    const moved = refused([{ op: 'scale_plan', factor: 3, pivot: [0, 0] }], measured(50_000));
+    expect((moved.params.issues as CommandIssue[]).map(i => [i.path, i.code])).toContainEqual(['measurements[0]', 'annotation-out-of-range']);
+    // Already at the far level in the file: a scaling that brings it nearer is accepted, one that moves it farther is refused.
+    expect(ok([{ op: 'scale_plan', factor: 0.9, pivot: [0, 0] }], measured(500_000)).plan.measurements![0].b.x).toBe(450_000);
+    expect(refused([{ op: 'scale_plan', factor: 1.1, pivot: [0, 0] }], measured(500_000)).code).toBe('scale-result-invalid');
   });
   it('the chains scale with the plan in a later command of the same batch', () => {
     const result = ok([{ op: 'set_dimensions', dimensions: [chain] }, { op: 'scale_plan', factor: 2, pivot: [0, 0] }]);

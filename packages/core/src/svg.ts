@@ -1,4 +1,4 @@
-import { fitBounds } from './bounds.js';
+import { drawableAnnotations, fitBounds } from './bounds.js';
 import { planGeometry } from './plan-geometry.js';
 import { roomArea, roomLabelPoint } from './rooms.js';
 import type { PlanV2, Point, Rect, WallType } from './types.js';
@@ -91,9 +91,11 @@ export function renderPlanSvg(plan: PlanV2, options: SvgOptions = {}): string {
   if (options.furniture !== false) out.push(`<g data-layer="furniture" fill="none" stroke="#6b7280" ${thin}>${plan.furniture.map(f =>
     `<g data-furniture="${escape(f.id)}" transform="rotate(${n(f.rot)} ${n(f.cx)} ${n(f.cy)})">${rect([f.cx - f.w / 2, f.cy - f.d / 2, f.cx + f.w / 2, f.cy + f.d / 2], '')}</g>`).join('')}</g>`);
 
-  if (options.dimensions && plan.dimensions?.length) {
+  // A chain with a sum that is not finite is not drawn; the validator reports it.
+  const chains = drawableAnnotations(plan).dimensions;
+  if (options.dimensions && chains.length) {
     const parts: string[] = [];
-    for (const d of plan.dimensions) {
+    for (const d of chains) {
       let pos = d.start;
       const at = (v: number): Point => d.horizontal ? [v, d.at] : [d.at, v];
       const tick = (v: number) => d.horizontal ? line([v, d.at - 4 * font / 10], [v, d.at + 4 * font / 10], '') : line([d.at - 4 * font / 10, v], [d.at + 4 * font / 10, v], '');

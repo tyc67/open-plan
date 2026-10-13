@@ -83,6 +83,13 @@ describe('new and migrate', () => {
     expect(run(dir, 'migrate', V1_SAMPLE, 'plan.json')).toMatchObject({ code: 1, json: { code: 'DESTINATION_EXISTS' } });
     const replaced = run(dir, 'migrate', V1_SAMPLE, 'plan.json', '--replace');
     expect([replaced.code, typeof replaced.json.backup]).toEqual([0, 'string']);
+    // A warning that every source gets (a measurement far from the plan) is in the result of the migration, and validate shows it also for a v2 file.
+    expect(r.json.warnings).toEqual([]);
+    const far = JSON.parse(read(V1_SAMPLE)); far.measurements = [{ id: 'm', a: { x: 0, y: 0 }, b: { x: 60000, y: 0 } }];
+    writeFileSync(join(dir, 'far-v1.json'), JSON.stringify(far));
+    const migrated = run(dir, 'migrate', 'far-v1.json', 'far.json');
+    expect([migrated.code, migrated.json.warnings]).toMatchObject([0, [{ path: 'measurements[0]', code: 'annotation-far-from-plan' }]]);
+    expect(run(dir, 'validate', 'far.json')).toMatchObject({ code: 0, json: { ok: true, warnings: [{ code: 'annotation-far-from-plan' }] } });
   });
   it('migrate is strict: a v1 file with a tolerable issue writes nothing', () => {
     const dir = folder(), v1 = JSON.parse(read(V1_SAMPLE)); v1.rooms[0].mat = 'granite';

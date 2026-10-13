@@ -1,3 +1,4 @@
+import { annotationReport } from './bounds.js';
 import { wallLength } from './geometry.js';
 import { CEILING_MAX, CEILING_MIN, HEAD_MIN } from './heights.js';
 import { polygonArea, polygonSelfCrossing } from './rooms.js';
@@ -44,8 +45,13 @@ export const LENGTH_TOLERANCE = 1e-6;
 export const TOLERABLE_CODES: ReadonlySet<string> = new Set([
   'room-area-too-small', 'room-self-crossing', 'room-material-missing', 'openings-overlap',
   'height-out-of-range', 'window-sill-not-below-head', 'window-in-low-wall', 'plan-too-large', 'too-many-items',
-  'wall-not-demolishable',
+  'wall-not-demolishable', 'annotation-out-of-range',
 ]);
+/**
+ * Codes for issues that are a warning for every source, also for an import or `validate`: the item is possibly
+ * intended, so no file is refused for it, but the reader must see it.
+ */
+export const ADVISORY_CODES: ReadonlySet<string> = new Set(['annotation-far-from-plan']);
 
 export const WALL_TYPES = ['e', 'b', 'n', 'low'] as const;
 export const OPENING_TYPES = ['window', 'door', 'sliding-door', 'hole'] as const;
@@ -68,8 +74,9 @@ const EXPECTED: Record<Kind, string> = { string: 'string', id: 'non-empty string
 class Collector {
   blocking: Issue[] = [];
   tolerable: Issue[] = [];
+  advisory: Issue[] = [];
   add(path: string, code: string, params: Record<string, unknown> = {}) {
-    (TOLERABLE_CODES.has(code) ? this.tolerable : this.blocking).push({ path, code, params });
+    (ADVISORY_CODES.has(code) ? this.advisory : TOLERABLE_CODES.has(code) ? this.tolerable : this.blocking).push({ path, code, params });
   }
   /** Checks a field's presence and type. Returns true when it is present and has the right type. */
   field(obj: Obj, key: string, path: string, kind: Kind, optional = false): boolean {
@@ -176,8 +183,8 @@ class Extent {
 }
 
 const finishPolicy = (c: Collector, source: ValidationSource) => source === 'saved'
-  ? { errors: c.blocking, warnings: c.tolerable }
-  : { errors: [...c.blocking, ...c.tolerable], warnings: [] as Issue[] };
+  ? { errors: c.blocking, warnings: [...c.tolerable, ...c.advisory] }
+  : { errors: [...c.blocking, ...c.tolerable], warnings: c.advisory };
 
 /**
  * Checks the shared fields of a plan of any version (rooms, furniture, materials, measurements, dimensions, cost).
@@ -305,6 +312,13 @@ export function validatePlan(input: unknown, source: ValidationSource): Validati
   if (extent.x0 <= extent.x1) {
     const width = extent.x1 - extent.x0, depth = extent.y1 - extent.y0;
     if (width > PLAN_LIMITS.size || depth > PLAN_LIMITS.size) c.add('$', 'plan-too-large', { width, depth, limit: PLAN_LIMITS.size });
+  }
+
+  // Measurements and dimension chains far from the plan. The fields must be valid for this, and a plan with a blocking
+  // issue is refused in any case. The 2D view leaves the same items out of "Fit" (bounds.ts).
+  if (!c.blocking.length) for (const r of annotationReport(input as unknown as PlanV2)) {
+    const path = r.index === null ? r.list : `${r.list}[${r.index}]`;
+    c.add(path, r.level === 'near' ? 'annotation-far-from-plan' : 'annotation-out-of-range', { distance: r.distance, limit: r.limit, finite: r.drawable, all: r.index === null });
   }
 
   const { errors, warnings } = finishPolicy(c, source);

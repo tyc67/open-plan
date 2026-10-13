@@ -332,6 +332,29 @@ try {
   check('agent prompt: the privacy text is beside it', (await card.locator('[data-privacy]').innerText()).includes('Open Plan 不會上傳你的圖片或平面圖'));
   if (imageDir) { await card.scrollIntoViewIfNeeded(); await page.screenshot({ path: join(imageDir, 'agent-prompt.png') }); }
 
+  // Measurements and dimension chains far from the plan: a warning at the near level, an error at the far level, and
+  // a view that does not follow a reported item. The example plan is 8 m wide.
+  const measured = x => JSON.stringify({ ...example, measurements: [{ id: 'm1', a: { x: 0, y: 0 }, b: { x, y: 0 } }] });
+  await load([[KEY, exampleText]]);
+  await importFile(file('near.json', measured(40000)));
+  check('far annotation: a near-level file can be imported, and the dialog shows the warning', (await dialog.getAttribute('data-import-dialog')) === 'ok' && (await dialog.locator('[data-import-warnings] li').count()) === 1 && (await dialog.locator('[data-import-warnings]').innerText()).includes('確認單位'));
+  await confirm();
+  const near = await saved();
+  check('far annotation: the imported plan keeps the measurement', near.measurements?.[0]?.b.x === 40000);
+  check('far annotation: the view fits the plan and not the reported measurement', (await fitMatches(near)) && (await viewBox())[2] < 30000, (await viewBox()).join(' '));
+  check('far annotation: the measurement is still drawn', (await page.locator('[data-measurement-id="m1"]').count()) === 1);
+  await openPanel();
+  check('far annotation: the plan panel shows the warning', (await page.locator('[data-plan-warnings]').innerText()).includes('確認單位'));
+  await importFile(file('far.json', measured(1e7)));
+  check('far annotation: a far-level file is refused with its reason', (await dialog.getAttribute('data-import-dialog')) === 'error' && (await dialog.locator('[data-import-errors]').innerText()).includes('measurements[0]'));
+  await dialog.getByRole('button', { name: '關閉' }).first().click();
+  // A saved plan with a chain that cannot be drawn: it opens, the chain is left out, and the view is usable.
+  await load([[KEY, JSON.stringify({ ...example, dimensions: [{ horizontal: true, at: -600, start: 0, segments: [3000, 5000] }, { horizontal: true, at: -900, start: 0, segments: [1e308, 1e308] }] })]]);
+  check('far annotation: a saved plan with a chain that cannot be drawn opens with a usable view', (await viewBox()).every(Number.isFinite) && (await viewBox())[2] < 30000);
+  check('far annotation: only the chain that can be drawn is drawn', (await page.locator('.dimension-chain').count()) === 1);
+  await openPanel();
+  check('far annotation: its warning is in the plan panel', (await page.locator('[data-plan-warnings]').innerText()).includes('無法繪製'));
+
   check('no page errors', errors.length === 0, errors.join(' | '));
 } finally {
   await browser.close();

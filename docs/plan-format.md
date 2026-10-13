@@ -16,7 +16,7 @@ The full structural rules are in [`open-plan.schema.json`](open-plan.schema.json
 - `rooms`: `poly` is the room outline on the inside face of its walls (3 or more points, no crossing edges). `mat` is a key of `materials`. Optional `at` (label position; when omitted, the editor and PNG use the same interior-point fallback without adding it to the plan) and `counted: false` (not in the floor area).
 - `materials`: an object of `{ "name": text, "sw": colour }`, keyed by the `mat` values. Optional `price` (per m², 0 or more).
 - `furniture`: `cx`, `cy` (centre), `w`, `d` (size, above 0), `rot` (degrees), `type`, `name`, optional `color`. Use `[]` for none.
-- Optional: `measurements`, `dimensions` (dimension chains: each is `{ "horizontal": true or false, "at": number, "start": number, "segments": [lengths] }`; change them with the `set_dimensions` command), `costEstimate`.
+- Optional: `measurements`, `dimensions` (dimension chains: each is `{ "horizontal": true or false, "at": number, "start": number, "segments": [lengths] }`; change them with the `set_dimensions` command), `costEstimate`. Keep measurements and dimension chains near the plan: more than 20 m outside the walls, rooms and furniture (or more than the longer side of their box, if that is more) gives the warning `annotation-far-from-plan`; more than 100 m outside, or a value that cannot be drawn (not finite, or above 1e15 mm), is the error `annotation-out-of-range`. In a plan with no walls, rooms or furniture, the same error is given when the box around all measurements and dimension chains is more than 100 m on a side. The 2D view does not fit itself to an item with one of these reports.
 - Every `id` is unique in its list. The plan is at most 100 × 100 m.
 
 ## Example

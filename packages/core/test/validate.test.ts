@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { Ajv2020 } from 'ajv/dist/2020.js';
 import schema from '../../../docs/open-plan.schema.json' with { type: 'json' };
 import sampleV1 from './fixtures/sample-v1.json' with { type: 'json' };
-import { TOLERABLE_CODES, effectiveOpeningHeights, migrateV1, validatePlan, validateSharedFields } from '../src/index.js';
+import { TOLERABLE_CODES, applyCommands, createEmptyPlan, createSamplePlan, effectiveOpeningHeights, migrateV1, validatePlan, validateSharedFields } from '../src/index.js';
 import type { OpeningV2 } from '../src/index.js';
 import { base, SEMANTIC, STRUCTURAL, variant } from './validation-fixtures.js';
 
@@ -131,5 +131,46 @@ describe('length tolerance along a wall', () => {
   it('0.1 mm outside the wall or over the next opening is still an issue', () => {
     expect(validatePlan(plan([{ id: 'o', type: 'hole', wallId: 'w', offset: 1000.1, width: 1000.3 }]), 'import').errors.map(e => e.code)).toEqual(['opening-outside-wall']);
     expect(validatePlan(plan([{ id: 'o1', type: 'hole', wallId: 'w', offset: 0, width: 1000.3 }, { id: 'o2', type: 'hole', wallId: 'w', offset: 1000.2, width: 500 }]), 'import').errors.map(e => e.code)).toEqual(['openings-overlap']);
+  });
+});
+
+describe('measurements and dimension chains far from the plan', () => {
+  const sample = () => createSamplePlan('s');
+  const m = (bx: number) => ({ id: 'm', a: { x: 0, y: 0 }, b: { x: bx, y: 0 } });
+  const codes = (issues: { path: string; code: string }[]) => issues.map(i => [i.path, i.code]);
+
+  it('near level: a warning for a saved plan and also for an import, which is not refused', () => {
+    const plan = { ...sample(), measurements: [m(50_000)] };
+    for (const source of ['saved', 'import'] as const) {
+      const result = validatePlan(plan, source);
+      expect([source, result.ok, result.errors]).toEqual([source, true, []]);
+      expect(result.warnings).toMatchObject([{ path: 'measurements[0]', code: 'annotation-far-from-plan', params: { limit: 20_000, finite: true } }]);
+    }
+  });
+  it('far level: an error for an import, a warning for a saved plan, which keeps its data', () => {
+    const plan = { ...sample(), dimensions: [{ horizontal: true, at: -600, start: 0, segments: [1e7] }] };
+    const strict = validatePlan(plan, 'import'), saved = validatePlan(plan, 'saved');
+    expect([strict.ok, codes(strict.errors), strict.warnings]).toEqual([false, [['dimensions[0]', 'annotation-out-of-range']], []]);
+    expect([saved.ok, codes(saved.warnings)]).toEqual([true, [['dimensions[0]', 'annotation-out-of-range']]]);
+    expect(saved.plan!.dimensions).toEqual(plan.dimensions);
+  });
+  it('a sum that is not finite is at the far level, not a blocking error, so a command can still repair the plan', () => {
+    const plan = { ...sample(), dimensions: [{ horizontal: true, at: -600, start: 0, segments: [1e308, 1e308] }] };
+    const saved = validatePlan(plan, 'saved');
+    expect([saved.ok, saved.warnings]).toMatchObject([true, [{ path: 'dimensions[0]', code: 'annotation-out-of-range', params: { finite: false, distance: null } }]]);
+    expect(validatePlan(plan, 'import').ok).toBe(false);
+    const repaired = applyCommands(plan, [{ op: 'set_dimensions', dimensions: [] }]);
+    expect(repaired.ok && validatePlan(repaired.plan, 'import').ok).toBe(true);
+  });
+  it('with no physical content the path is the list; with a blocking error the annotations are not checked', () => {
+    const empty = { ...createEmptyPlan('e'), measurements: [m(100_001)] };
+    expect(validatePlan(empty, 'import').errors).toMatchObject([{ path: 'measurements', code: 'annotation-out-of-range', params: { all: true, distance: 1 } }]);
+    const broken = { ...sample(), name: 5, measurements: [m(1e7)] };
+    expect(codes(validatePlan(broken, 'saved').errors)).toEqual([['$.name', 'type-invalid']]);
+    expect(validatePlan(broken, 'saved').warnings).toEqual([]);
+  });
+  it('the sample and a plan with normal annotations get no report', () => {
+    expect(validatePlan(sample(), 'import')).toMatchObject({ ok: true, errors: [], warnings: [] });
+    expect(validatePlan({ ...sample(), measurements: [m(20_000)] }, 'import').warnings).toEqual([]);
   });
 });
