@@ -1,4 +1,4 @@
-import type { Point, WallType } from '../types.js';
+import type { DimensionChain, Point, WallType } from '../types.js';
 import type { Issue } from '../validate.js';
 
 // ---- Commands (roadmap C1). Lengths in mm; x goes right and y goes down. ----
@@ -65,6 +65,11 @@ export type PlanCommand =
   | { op: 'set_plan_name'; name: string }
   /** Creates or replaces one material by its key. */
   | { op: 'set_material'; key: string; name: string; sw: string; price?: number }
+  /**
+   * Replaces all dimension chains of the plan; an empty list removes them. A chain has no id, so there is no command
+   * for one chain. Each chain: `horizontal`, `at`, `start` and `segments` (1 or more lengths above 0).
+   */
+  | { op: 'set_dimensions'; dimensions: DimensionChain[] }
   /** 2000 to 6000 mm, and not below any opening head. */
   | { op: 'set_ceiling_height'; ceilingHeight: number }
   /**

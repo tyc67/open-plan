@@ -16,7 +16,7 @@ The full structural rules are in [`open-plan.schema.json`](open-plan.schema.json
 - `rooms`: `poly` is the room outline on the inside face of its walls (3 or more points, no crossing edges). `mat` is a key of `materials`. Optional `at` (label position; when omitted, the editor and PNG use the same interior-point fallback without adding it to the plan) and `counted: false` (not in the floor area).
 - `materials`: an object of `{ "name": text, "sw": colour }`, keyed by the `mat` values. Optional `price` (per m², 0 or more).
 - `furniture`: `cx`, `cy` (centre), `w`, `d` (size, above 0), `rot` (degrees), `type`, `name`, optional `color`. Use `[]` for none.
-- Optional: `measurements`, `dimensions` (dimension chains), `costEstimate`.
+- Optional: `measurements`, `dimensions` (dimension chains: each is `{ "horizontal": true or false, "at": number, "start": number, "segments": [lengths] }`; change them with the `set_dimensions` command), `costEstimate`.
 - Every `id` is unique in its list. The plan is at most 100 × 100 m.
 
 ## Example

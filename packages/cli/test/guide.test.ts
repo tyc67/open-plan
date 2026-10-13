@@ -76,6 +76,7 @@ const VALUE: Record<string, unknown> = {
   demolished: false, offset: 7000, width: 500, sill: 900, head: 2100, hinge: 'start', swing: 'left', entry: true, keep: 'start',
   mat: 'wood', poly: [[0, 200], [100, 200], [100, 300]], counted: true, cx: 1, cy: 1, w: 1, d: 1, rot: 0, color: '#fff',
   key: 'k', sw: '#fff', price: 1, ceilingHeight: 3000, pivot: [0, 0], distance: 8000,
+  dimensions: [{ horizontal: true, at: -600, start: 0, segments: [8000] }],
 };
 const FIELD_CODES = ['command-field-unknown', 'missing-field', 'type-invalid', 'enum-invalid'];
 /** A command with every documented field of one form. */
@@ -84,8 +85,8 @@ function fullCommand(op: string, selector: Record<string, unknown>, fields: Fiel
 }
 
 describe('agent guide: the command reference', () => {
-  it('has one section for each of the 25 commands, and no other', () => {
-    expect(COMMAND_OPS).toHaveLength(25);
+  it('has one section for each of the 26 commands, and no other', () => {
+    expect(COMMAND_OPS).toHaveLength(26);
     expect([...sections.keys()].sort()).toEqual([...COMMAND_OPS].sort());
   });
   for (const op of COMMAND_OPS) it(`${op}: each argument form documents exactly the fields that the command accepts in that form`, () => {
@@ -195,6 +196,18 @@ describe('agent guide: the examples run through the built CLI with real revision
       expect(apply.code, `${name}: ${apply.out}${apply.err}`).toBe(0);
       expect(apply.json.revision, name).not.toBe(apply.json.previousRevision);
       expect(validate.code, `${name}: ${validate.out}`).toBe(0);
+    }
+  });
+  it('set_dimensions: the reference documents exactly the fields of a chain, and each one is required', () => {
+    // The fields of a chain are the nested bullets of the section; the tests above see only the top field.
+    const documented = [...sections.get('set_dimensions')!.matchAll(/^ {4}- `(\w+)`:/gm)].map(m => m[1]);
+    const chain: Record<string, unknown> = { horizontal: true, at: -600, start: 0, segments: [8000] };
+    const error = (value: object) => { const r = applyCommands(examplePlan, [{ op: 'set_dimensions', dimensions: [value] }]); return r.ok ? null : r.errors[0]; };
+    expect(error({ ...chain, zzzUnknown: 1 })).toMatchObject({ code: 'command-field-unknown', params: { allowed: documented } });
+    expect(error(chain)).toBe(null);
+    for (const field of documented) {
+      const { [field]: _left, ...rest } = chain;
+      expect(error(rest), field).toMatchObject({ code: 'missing-field', path: `commands[0].dimensions[0].${field}` });
     }
   });
   it('every command appears in an example, and scale_plan in both forms', () => {

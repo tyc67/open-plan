@@ -10,7 +10,7 @@ A batch is a list of commands that changes a plan. Use a batch for every change 
 - **Before the commands run**, the plan is checked. A plan with an error that blocks the editor is refused; fix it first (validate the plan). A schema version 1 file is refused with `NOT_VERSION_2`; migrate it first.
 - **On success**, the result has the new `revision`, the `previousRevision`, the `backup` name, `warnings` and `notes`. Use the new revision for the next batch.
 - **Warnings** do not stop the batch. They are issues that the editor accepts, for example a room edge that is no longer on a wall face (`room-edge-off-wall`). A warning that the plan already had has no `commandIndex`. Validation is stricter than a batch: after a batch, validate the plan.
-- **Notes** tell you what changed beyond the command itself. `id-generated` (`{ list, id }`) gives the id of a new item that had no `id`; use that id in later commands. Other notes: `openings-deleted`, `wall-split`, `walls-joined`, `material-created`, `material-replaced`, `furniture-price-removed`, `plan-scaled`.
+- **Notes** tell you what changed beyond the command itself. `id-generated` (`{ list, id }`) gives the id of a new item that had no `id`; use that id in later commands. Other notes: `openings-deleted`, `wall-split`, `walls-joined`, `material-created`, `material-replaced`, `furniture-price-removed`, `dimensions-set`, `plan-scaled`.
 - If the commands do not change the plan, the file is not written and the revision stays the same.
 
 **After `REVISION_CONFLICT`:** the plan changed, for example because the user edited it in the editor. Do not send the same batch again without a check. Read the plan again, check that your commands still fit it (the ids exist, the positions are still correct), and then send them with the new revision.
@@ -387,6 +387,27 @@ Refused: `height-out-of-range`, `opening-head-above-ceiling` (lower that head fi
 [{ "op": "set_ceiling_height", "ceilingHeight": 3000 }]
 ```
 
+#### `set_dimensions`
+
+Replaces all dimension chains of the plan (note `dimensions-set`, with the number of chains before and after). A chain has no id, so there is no command for one chain: to add or change one, read the `dimensions` of the plan, change the list and send the full list. An empty list removes all chains.
+
+- `dimensions` (required): a list of chains. Each chain has these 4 fields, and no others:
+    - `horizontal`: `true` for a chain along x, `false` for a chain along y.
+    - `at`: where the line is drawn: its y for a horizontal chain, its x for a vertical one. It is best outside the walls; that is not checked.
+    - `start`: where the first segment starts: an x for a horizontal chain, a y for a vertical one.
+    - `segments`: 1 or more lengths, each more than 0, one after the other from `start`. The drawing shows each length as a number.
+
+Refused: `dimension-no-segments`, `size-not-positive` (a length of 0 or less), `value-out-of-range` (`at`, `start` or the end of a segment is more than 1 000 000 mm from 0). The path names the value, for example `commands[0].dimensions[1].segments[0]`.
+
+Draw the plan with its dimension chains to check them. Do not invent a length: a chain repeats lengths of the plan, it does not correct them.
+
+```json
+[{ "op": "set_dimensions", "dimensions": [
+  { "horizontal": true, "at": -600, "start": 0, "segments": [3000, 5000] },
+  { "horizontal": false, "at": -600, "start": 0, "segments": [4000] }
+] }]
+```
+
 #### `scale_plan`
 
 Scales the whole plan, for example when the scale from the image was not correct. It has two forms:
@@ -398,7 +419,7 @@ A command with `factor` is read in the first form; a command without it, in the 
 
 Wall ends and thicknesses, openings along their walls, rooms, furniture positions, measurements and dimension chains scale. Furniture sizes, heights, door hinge and swing, materials and prices do not. Results are rounded to 0.1 mm. The note `plan-scaled` gives the factor and the pivot.
 
-Refused: `size-not-positive`, `scale-points-same`, `scale-result-invalid` (the scaled plan would have errors, or be larger than 100 × 100 m).
+Refused: `size-not-positive`, `scale-points-same`, `scale-result-invalid` (the scaled plan would have errors, or be larger than 100 × 100 m, or a dimension chain would go more than 1 000 000 mm from 0 or get a length of 0).
 
 ```json
 [{ "op": "scale_plan", "factor": 1.05, "pivot": [0, 0] }]

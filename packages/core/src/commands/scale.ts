@@ -1,5 +1,6 @@
 import type { DimensionChain, OpeningV2, PlanV2, Point, WallV2 } from '../types.js';
-import { validatePlan } from '../validate.js';
+import { validatePlan, type Issue } from '../validate.js';
+import { DIMENSION_REACH } from './plan.js';
 import type { PlanCommand } from './types.js';
 import { readFields, refuse, type Step } from './support.js';
 
@@ -40,6 +41,33 @@ export function scalePlan(plan: PlanV2, f: number, pivot: Point): PlanV2 {
   };
 }
 
+/**
+ * How far a chain goes from the origin: the largest distance of `at`, `start` and the end of each segment (a file can
+ * have a negative length, so the last end is not always the farthest). Not finite for a sum that overflows.
+ */
+function reach(d: DimensionChain): number {
+  let end = d.start, far = Math.max(Math.abs(d.at), Math.abs(d.start));
+  for (const s of d.segments) { end += s; far = Math.max(far, Math.abs(end)); }
+  return Number.isFinite(far) ? far : Infinity;
+}
+
+/**
+ * The dimension chains that the scaling breaks. The validator has no rule for the size of a chain, and the size limit
+ * of the plan does not include the chains, so they are checked here: a chain must not go out of reach (see
+ * `set_dimensions`), and a length must not become 0. A chain that was already so is kept if the scaling does not make
+ * it worse (the Step C follow-up rule for existing issues).
+ */
+function dimensionIssues(before: PlanV2, after: PlanV2): Issue[] {
+  const issues: Issue[] = [];
+  (after.dimensions ?? []).forEach((d, i) => {
+    const was = before.dimensions![i], far = reach(d);
+    // A result that is not finite is always refused: "no worse" has a meaning only for finite values.
+    if (!Number.isFinite(far) || (far > DIMENSION_REACH && far > reach(was))) issues.push({ path: `dimensions[${i}]`, code: 'value-out-of-range', params: { min: -DIMENSION_REACH, max: DIMENSION_REACH, value: far } });
+    d.segments.forEach((s, k) => { if (!(s > 0) && was.segments[k] > 0) issues.push({ path: `dimensions[${i}].segments[${k}]`, code: 'size-not-positive', params: { value: s } }); });
+  });
+  return issues;
+}
+
 function scale(plan: PlanV2, c: Extract<PlanCommand, { op: 'scale_plan' }>): Step {
   let factor: number, pivot: Point;
   if (Object.hasOwn(c, 'factor')) {
@@ -58,7 +86,7 @@ function scale(plan: PlanV2, c: Extract<PlanCommand, { op: 'scale_plan' }>): Ste
   // D3: the scaling is refused with no change if the result has errors. A plan larger than the size limit counts as an
   // error here, although the validator only warns about it in a saved plan.
   const result = validatePlan(next, 'saved');
-  const issues = [...result.errors, ...result.warnings.filter(w => w.code === 'plan-too-large')];
+  const issues = [...result.errors, ...result.warnings.filter(w => w.code === 'plan-too-large'), ...dimensionIssues(plan, next)];
   if (issues.length) refuse(null, 'scale-result-invalid', { factor, issues: issues.slice(0, 20), count: issues.length });
   return { plan: next, notes: [{ code: 'plan-scaled', params: { factor, pivot } }] };
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyCommands, COMMAND_OPS, createSamplePlan, hingePoint, openingRect, validatePlan, wallLength } from '../src/index.js';
+import { applyCommands, COMMAND_OPS, createEmptyPlan, createSamplePlan, hingePoint, openingRect, validatePlan, wallLength } from '../src/index.js';
 import type { CommandIssue, DoorV2, PlanV2 } from '../src/index.js';
 
 // One room, 6 × 4 m: exterior wall w1 on top with a window and a door, partition w2 on the right, low wall w3 below,
@@ -111,7 +111,7 @@ describe('batch contract', () => {
   });
   it('every op has an implementation and is listed once', () => {
     expect(new Set(COMMAND_OPS).size).toBe(COMMAND_OPS.length);
-    expect(COMMAND_OPS).toHaveLength(25);
+    expect(COMMAND_OPS).toHaveLength(26);
   });
 });
 
@@ -397,6 +397,81 @@ describe('furniture commands', () => {
     expect([result.plan.furniture, result.plan.costEstimate]).toEqual([[], { furniturePrices: { other: 5 }, wastePercent: 10 }]);
     expect(result.notes.at(-1)).toEqual({ commandIndex: 1, code: 'furniture-price-removed', params: { furnitureId: 's' } });
     expect(ok([{ ...sofa, id: 's' }, { op: 'delete_furniture', furnitureId: 's' }]).notes).toEqual([]);
+  });
+});
+
+describe('set_dimensions', () => {
+  const chain = { horizontal: true, at: -600, start: 0, segments: [3000, 5000] };
+  it('replaces all chains, removes them with an empty list, and does not change the input', () => {
+    const plan = { ...base(), dimensions: [{ horizontal: false, at: 9000, start: 0, segments: [100] }] }, before = copy(plan), sent = copy(chain);
+    const result = ok([{ op: 'set_dimensions', dimensions: [sent, { ...chain, horizontal: false }] }], plan);
+    expect(result.plan.dimensions).toEqual([chain, { ...chain, horizontal: false }]);
+    expect(result.notes).toEqual([{ commandIndex: 0, code: 'dimensions-set', params: { before: 1, after: 2 } }]);
+    expect(plan).toEqual(before);
+    sent.segments.push(1);                                        // the plan has its own copy of the list
+    expect(result.plan.dimensions![0].segments).toEqual([3000, 5000]);
+    expect(ok([{ op: 'set_dimensions', dimensions: [] }], plan).plan.dimensions).toEqual([]);
+    const { dimensions: _none, ...bare } = base();                // a plan with no `dimensions` field
+    expect(ok([{ op: 'set_dimensions', dimensions: [chain] }], bare).notes[0].params).toEqual({ before: 0, after: 1 });
+  });
+  it('refuses a chain that is not complete or not usable, with the path of the value', () => {
+    const one = (value: unknown) => refused([{ op: 'set_dimensions', dimensions: [chain, value] }]);
+    expect(refused([{ op: 'set_dimensions' }])).toMatchObject({ path: 'commands[0].dimensions', code: 'missing-field' });
+    expect(refused([{ op: 'set_dimensions', dimensions: chain }])).toMatchObject({ path: 'commands[0].dimensions', code: 'type-invalid' });
+    expect(refused([{ op: 'set_dimensions', dimensions: [], chains: [] }])).toMatchObject({ path: 'commands[0].chains', code: 'command-field-unknown', params: { allowed: ['dimensions'] } });
+    expect(one(null)).toMatchObject({ path: 'commands[0].dimensions[1]', code: 'type-invalid' });
+    expect(one({ ...chain, id: 'c' })).toMatchObject({ path: 'commands[0].dimensions[1].id', code: 'command-field-unknown' });
+    const { at: _at, ...noAt } = chain;
+    expect(one(noAt)).toMatchObject({ path: 'commands[0].dimensions[1].at', code: 'missing-field' });
+    expect(one({ ...chain, horizontal: 'yes' })).toMatchObject({ path: 'commands[0].dimensions[1].horizontal', code: 'type-invalid' });
+    expect(one({ ...chain, start: '0' })).toMatchObject({ path: 'commands[0].dimensions[1].start', code: 'type-invalid' });
+    expect(one({ ...chain, segments: 3000 })).toMatchObject({ path: 'commands[0].dimensions[1].segments', code: 'type-invalid' });
+    expect(one({ ...chain, segments: [] })).toMatchObject({ path: 'commands[0].dimensions[1].segments', code: 'dimension-no-segments' });
+    expect(one({ ...chain, segments: [100, '5'] })).toMatchObject({ path: 'commands[0].dimensions[1].segments[1]', code: 'type-invalid' });
+    expect(one({ ...chain, segments: [100, 0] })).toMatchObject({ path: 'commands[0].dimensions[1].segments[1]', code: 'size-not-positive' });
+    expect(one({ ...chain, segments: [-100] })).toMatchObject({ path: 'commands[0].dimensions[1].segments[0]', code: 'size-not-positive' });
+  });
+  it('refuses a chain that is too far away, a list with a hole, and an inherited field (found in a review)', () => {
+    const one = (value: unknown) => refused([{ op: 'set_dimensions', dimensions: [value] }]);
+    // Very large numbers are finite one by one, but their sum is not, and the view of the plan would have no size.
+    expect(one({ ...chain, segments: [1e308, 1e308] })).toMatchObject({ path: 'commands[0].dimensions[0].segments[0]', code: 'value-out-of-range', params: { max: 1_000_000 } });
+    expect(one({ ...chain, at: -1_000_001 })).toMatchObject({ path: 'commands[0].dimensions[0].at', code: 'value-out-of-range' });
+    expect(one({ ...chain, start: 1_000_001 })).toMatchObject({ path: 'commands[0].dimensions[0].start', code: 'value-out-of-range' });
+    expect(one({ ...chain, start: 999_000, segments: [500, 501] })).toMatchObject({ path: 'commands[0].dimensions[0].segments[1]', code: 'value-out-of-range' });
+    expect(ok([{ op: 'set_dimensions', dimensions: [{ ...chain, at: 1_000_000, start: -1_000_000, segments: [2_000_000] }] }]).plan.dimensions).toHaveLength(1);
+    // JSON has no list with a hole, but a caller of the core can make one.
+    expect(refused([{ op: 'set_dimensions', dimensions: new Array(1) }])).toMatchObject({ path: 'commands[0].dimensions[0]', code: 'type-invalid' });
+    const holes = new Array(2); holes[1] = 100;
+    expect(one({ ...chain, segments: holes })).toMatchObject({ path: 'commands[0].dimensions[0].segments[0]', code: 'type-invalid' });
+    const { segments: _segments, ...rest } = chain;
+    expect(one(Object.assign(Object.create({ segments: [100] }), rest))).toMatchObject({ path: 'commands[0].dimensions[0].segments', code: 'missing-field' });
+    expect(refused([Object.assign(Object.create({ dimensions: [] }), { op: 'set_dimensions' })])).toMatchObject({ path: 'commands[0].dimensions', code: 'missing-field' });
+  });
+  it('scale_plan refuses a result with a chain out of reach or with a length of 0 (found in a review)', () => {
+    // Each scaled length is finite, but the end of the chain is not.
+    const empty = createEmptyPlan('e');                              // no wall: only the chains can stop the scaling
+    const long = { op: 'set_dimensions', dimensions: [{ horizontal: true, at: 0, start: 0, segments: Array(100).fill(10000) }] };
+    const far = refused([long, { op: 'scale_plan', factor: 1e303, pivot: [0, 0] }], empty);
+    expect(far).toMatchObject({ commandIndex: 1, code: 'scale-result-invalid' });
+    expect((far.params.issues as CommandIssue[])[0]).toMatchObject({ path: 'dimensions[0]', code: 'value-out-of-range' });
+    expect((refused([long, { op: 'scale_plan', factor: 1.01, pivot: [0, 0] }], empty).params.issues as CommandIssue[])[0].path).toBe('dimensions[0]');
+    const small = { op: 'set_dimensions', dimensions: [{ ...chain, segments: [3000, 0.4] }] };
+    const zero = refused([small, { op: 'scale_plan', factor: 0.1, pivot: [0, 0] }], empty);
+    expect((zero.params.issues as CommandIssue[])[0]).toMatchObject({ path: 'dimensions[0].segments[1]', code: 'size-not-positive' });
+    // A chain that a file already has out of reach, or with a length of 0, does not block a scaling that makes it no worse.
+    const loose = { ...empty, dimensions: [{ horizontal: true, at: 0, start: 0, segments: [3_000_000, 0] }] };
+    expect(ok([{ op: 'scale_plan', factor: 0.5, pivot: [0, 0] }], loose).plan.dimensions![0].segments).toEqual([1_500_000, 0]);
+    expect(refused([{ op: 'scale_plan', factor: 1.5, pivot: [0, 0] }], loose).code).toBe('scale-result-invalid');
+    // A chain of a file that is already not finite stays refused when the scaled result is not finite: "no worse" is for finite values.
+    const overflow = { ...empty, dimensions: [{ horizontal: true, at: 0, start: 0, segments: Array(100).fill(1e307) }] };
+    expect((refused([{ op: 'scale_plan', factor: 0.5, pivot: [0, 0] }], overflow).params.issues as CommandIssue[])[0]).toMatchObject({ path: 'dimensions[0]', code: 'value-out-of-range' });
+    // A negative length of a file: an end in the middle of the chain counts, not only the last end.
+    const back = { ...empty, dimensions: [{ horizontal: true, at: 0, start: 0, segments: [900_000, -900_000] }] };
+    expect(refused([{ op: 'scale_plan', factor: 1.2, pivot: [0, 0] }], back).code).toBe('scale-result-invalid');
+  });
+  it('the chains scale with the plan in a later command of the same batch', () => {
+    const result = ok([{ op: 'set_dimensions', dimensions: [chain] }, { op: 'scale_plan', factor: 2, pivot: [0, 0] }]);
+    expect(result.plan.dimensions).toEqual([{ horizontal: true, at: -1200, start: 0, segments: [6000, 10000] }]);
   });
 });
 
