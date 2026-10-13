@@ -5,7 +5,7 @@ import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer
 import { createModelFactory } from './models.js';
 import { formatLength } from '../units.js';
 import { snapFurniture } from '../wallSnapping.js';
-import { cameraPose, createViewFrame, groundSize, roomArea, shadowBox } from 'open-plan-core';
+import { cameraPose, createViewFrame, groundSize, roomArea, roomLabelPoint, shadowBox } from 'open-plan-core';
 import { wx, wz, planX, planY, setFrame } from './coordinates.js';
 
 function disposeGeometry(group) {
@@ -107,12 +107,12 @@ export function createViewer(host, callbacks) {
       if(architecture) disposeGeometry(architecture);
       architecture = factory.architecture(doc,options.cut,options.bearing); scene.add(architecture);
       for(const label of [...roomLabels.children]) { label.element.remove(); roomLabels.remove(label); }
-      for(const room of doc.rooms.filter(r=>r.at)) {
-        const el=document.createElement('div'); el.className='room-label';
+      for(const room of doc.rooms) {
+        const at=roomLabelPoint(room),el=document.createElement('div'); el.className='room-label';
         const name=document.createElement('span'); name.textContent=room.name;
         const area=document.createElement('small'); area.textContent=`${roomArea(room.poly).toFixed(1)} m²`;
         el.append(name,area);
-        const label=new CSS2DObject(el); label.position.set(wx(room.at[0]),.12,wz(room.at[1])); roomLabels.add(label);
+        const label=new CSS2DObject(el); label.position.set(wx(at[0]),.12,wz(at[1])); roomLabels.add(label);
       }
     }
     const ids=new Set(doc.furniture.map(f=>f.id));

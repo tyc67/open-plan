@@ -13,7 +13,7 @@ The full structural rules are in [`open-plan.schema.json`](open-plan.schema.json
     - `door`: `hinge` is `start` (at `offset`) or `end` (at `offset + width`); `swing` is `left` or `right` of the direction from `a` to `b`; `head` (default 2100). Optional `entry: true` for the main door.
     - `sliding-door` and `hole`: `head` (default 2100).
     - Every head is 1800 or more (windows excepted) and not above the ceiling. Optional `name`.
-- `rooms`: `poly` is the room outline on the inside face of its walls (3 or more points, no crossing edges). `mat` is a key of `materials`. Optional `at` (label position) and `counted: false` (not in the floor area).
+- `rooms`: `poly` is the room outline on the inside face of its walls (3 or more points, no crossing edges). `mat` is a key of `materials`. Optional `at` (label position; when omitted, the editor and PNG use the same interior-point fallback without adding it to the plan) and `counted: false` (not in the floor area).
 - `materials`: an object of `{ "name": text, "sw": colour }`, keyed by the `mat` values. Optional `price` (per m², 0 or more).
 - `furniture`: `cx`, `cy` (centre), `w`, `d` (size, above 0), `rot` (degrees), `type`, `name`, optional `color`. Use `[]` for none.
 - Optional: `measurements`, `dimensions` (dimension chains), `costEstimate`.

@@ -1,6 +1,6 @@
 import { fitBounds } from './bounds.js';
 import { planGeometry } from './plan-geometry.js';
-import { roomArea } from './rooms.js';
+import { roomArea, roomLabelPoint } from './rooms.js';
 import type { PlanV2, Point, Rect, WallType } from './types.js';
 
 /**
@@ -31,14 +31,8 @@ const pt = ([x, y]: Point) => `${n(x)},${n(y)}`;
 const escape = (text: string) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const rect = ([x0, y0, x1, y1]: Rect, attrs: string) => `<rect x="${n(x0)}" y="${n(y0)}" width="${n(x1 - x0)}" height="${n(y1 - y0)}" ${attrs}/>`;
 const line = (a: Point, b: Point, attrs: string) => `<line x1="${n(a[0])}" y1="${n(a[1])}" x2="${n(b[0])}" y2="${n(b[1])}" ${attrs}/>`;
-const text = (at: Point, size: number, content: string, attrs = '') =>
-  `<text x="${n(at[0])}" y="${n(at[1])}" font-size="${n(size)}" text-anchor="middle" dominant-baseline="middle"${attrs ? ` ${attrs}` : ''}>${escape(content)}</text>`;
-
-/** Centre of a polygon's bounding box: the label position of a room without `at`. */
-function boxCentre(poly: Point[]): Point {
-  const xs = poly.map(p => p[0]), ys = poly.map(p => p[1]);
-  return [(Math.min(...xs) + Math.max(...xs)) / 2, (Math.min(...ys) + Math.max(...ys)) / 2];
-}
+const text = (at: Point, size: number, content: string, attrs = '', exact = false) =>
+  `<text x="${exact ? at[0] : n(at[0])}" y="${exact ? at[1] : n(at[1])}" font-size="${n(size)}" text-anchor="middle" dominant-baseline="middle"${attrs ? ` ${attrs}` : ''}>${escape(content)}</text>`;
 
 /** The plan area and the image size in px that `renderPlanSvg` uses for these options; a caller can check the size first. */
 export function planImageSize(plan: PlanV2, options: Pick<SvgOptions, 'crop' | 'width'> = {}): { crop: Rect; width: number; height: number } {
@@ -123,8 +117,9 @@ export function renderPlanSvg(plan: PlanV2, options: SvgOptions = {}): string {
   }
 
   if (options.labels !== false && options.text !== false) out.push(`<g data-layer="labels" fill="#1f2933">${plan.rooms.map(r => {
-    const at = r.at ?? boxCentre(r.poly);
-    return text(at, font, r.name) + text([at[0], at[1] + font * 1.2], font * 0.75, `${roomArea(r.poly).toFixed(1)} m²`, 'fill="#52606d"');
+    // A thin outline can need a fallback finer than 0.1 mm to keep the point inside.
+    const at = roomLabelPoint(r);
+    return text(at, font, r.name, '', !r.at) + text([at[0], at[1] + font * 1.2], font * 0.75, `${roomArea(r.poly).toFixed(1)} m²`, 'fill="#52606d"', !r.at);
   }).join('')}</g>`);
 
   out.push('</svg>');

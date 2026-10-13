@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import ErrorBoundary from '../ErrorBoundary.jsx';
-import { createEmptyPlan, createId, createSamplePlan, fitBounds, planGeometry, roomArea, validatePlan } from 'open-plan-core';
+import { createEmptyPlan, createId, createSamplePlan, fitBounds, planGeometry, roomArea, roomLabelPoint, validatePlan } from 'open-plan-core';
 import { RotateCw, Trash2 } from 'lucide-react';
 import WorkspaceShell from '../workspace/WorkspaceShell.jsx';
 import { PLAN_KEY, PlanChangedElsewhere, adoptElsewhere, backupBeforeReplace, changedElsewhere, readElsewhere, keepOverElsewhere, loadDocument, loadFromElsewhere, preserveUnreadableDocument, replacedDocument, saveDocument, sessionDocument } from './storage.js';
@@ -424,8 +424,8 @@ export default function FloorPlanEditor({ fileSession = null }) {
     e.stopPropagation();
     const before=commitPendingEdit(),current=before.rooms.find(x=>x.id===r.id)||r;
     if(e.pointerType!=='touch')selectRoom(r.id);
-    const p=point(e);
-    drag.current={kind:'room-label',touch:e.pointerType==='touch',matrix:svg.current.getScreenCTM().inverse(),pointerId:e.pointerId,before,id:r.id,x:p.x,y:p.y,cx:current.at[0],cy:current.at[1],sx:e.clientX,sy:e.clientY};
+    const p=point(e),at=roomLabelPoint(current);
+    drag.current={kind:'room-label',touch:e.pointerType==='touch',matrix:svg.current.getScreenCTM().inverse(),pointerId:e.pointerId,before,id:r.id,x:p.x,y:p.y,cx:at[0],cy:at[1],sx:e.clientX,sy:e.clientY};
     svg.current.setPointerCapture(e.pointerId);
   }
   function move(e) {
@@ -778,15 +778,15 @@ export default function FloorPlanEditor({ fileSession = null }) {
         <SnapGuides guides={snapGuides} unit={unit} ratio={ratio}/>
         <Measurements selectedId={selectedMeasurement} onSelect={selectMeasurement} selectable={tool==='select'&&!spacePan&&!layers.locked.dimensions} measurements={layers.dimensions?doc.measurements:[]} preview={measurePreview} snapPoint={measurementSnap} unit={unit} ratio={ratio}/>
         {layers.dimensions&&<DimensionLines chains={doc.dimensions} unit={unit}/>}
-        {doc.rooms.filter(r=>r.at).map(r=>{
-          const area=roomArea(r.poly);
+        {doc.rooms.map(r=>{
+          const area=roomArea(r.poly),at=roomLabelPoint(r);
           const halo={stroke:'#fbf9f4',strokeWidth:45,paintOrder:'stroke',strokeLinejoin:'round'};
           const interactive=tool==='select'&&!spacePan&&!labelsLocked;
           const labelWidth=Math.max(layers.roomNames?r.name.length*250:0,layers.areas?750:0)+100;
           return <g key={r.id} className="room-label-2d" data-room-label-id={r.id} pointerEvents={interactive?'all':'none'} style={{cursor:interactive?'move':undefined}} onPointerDown={e=>startLabelDrag(e,r)}>
-            {(layers.roomNames||layers.areas)&&<rect x={r.at[0]-labelWidth/2} y={r.at[1]-(layers.roomNames?260:180)} width={labelWidth} height={layers.roomNames&&layers.areas?560:300} rx="45" fill="transparent" stroke={room?.id===r.id?'#0d9488':'none'} strokeWidth="1" strokeDasharray="4 3" vectorEffect="non-scaling-stroke"/>}
-            {layers.roomNames&&<text x={r.at[0]} y={r.at[1]} textAnchor="middle" fontSize="250" fontWeight="600" fill="#2b2824" {...halo}>{r.name}</text>}
-            {layers.areas&&<text x={r.at[0]} y={r.at[1]+(layers.roomNames?260:0)} textAnchor="middle" fontSize="175" fill="#7d7366" {...halo}>{area.toFixed(1)} m²</text>}
+            {(layers.roomNames||layers.areas)&&<rect x={at[0]-labelWidth/2} y={at[1]-(layers.roomNames?260:180)} width={labelWidth} height={layers.roomNames&&layers.areas?560:300} rx="45" fill="transparent" stroke={room?.id===r.id?'#0d9488':'none'} strokeWidth="1" strokeDasharray="4 3" vectorEffect="non-scaling-stroke"/>}
+            {layers.roomNames&&<text x={at[0]} y={at[1]} textAnchor="middle" fontSize="250" fontWeight="600" fill="#2b2824" {...halo}>{r.name}</text>}
+            {layers.areas&&<text x={at[0]} y={at[1]+(layers.roomNames?260:0)} textAnchor="middle" fontSize="175" fill="#7d7366" {...halo}>{area.toFixed(1)} m²</text>}
           </g>;
         })}
         {/* The point handles of the selected room, above the walls and the labels; the numbers are those of the panel. */}

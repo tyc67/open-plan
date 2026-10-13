@@ -1,5 +1,6 @@
 // Browser check for roadmap D4c: room editing through the core commands, in local file mode against a real `serve`.
 // Usage: pnpm --filter open-plan-cli build && node tools/checks/rooms-edit.mjs   Exit code 0 means every check passed.
+import { roomLabelPoint } from '../../packages/core/dist/index.js';
 import { chromium } from 'playwright-core';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -355,6 +356,40 @@ try {
   await page.waitForSelector('[aria-label="3D floor-plan view"] canvas'); await sleep(1500);
   check('3D: the view opens on the edited plan', (await page.locator('[aria-label="3D floor-plan view"] canvas').count()) === 1);
   check('the edited plan is valid for the CLI', cli('validate', 'plan.json').status === 0);
+
+  // 17. Missing label positions are display-only, in file and website mode; dragging creates one undo step.
+  const missing = { ...start, name: 'Missing label positions', rooms: start.rooms.map(({at, ...r}) => r) };
+  missing.rooms[0].poly = [[100,100],[3000,100],[3000,1000],[1000,1000],[1000,3000],[100,3000]];
+  const raw = JSON.stringify(missing, null, 2);
+  writeFileSync(plan, raw);
+  const labelsPage = await page.context().newPage(); let puts = 0;
+  labelsPage.on('pageerror', e => errors.push(e.message));
+  labelsPage.on('request', r => { if(r.method()==='PUT' && r.url().endsWith('/api/plan'))puts++; });
+  await labelsPage.goto(started.url); await labelsPage.waitForSelector('[data-room-label-id="r1"]'); await sleep(800);
+  const labels = labelsPage.locator('[data-room-label-id]');
+  check('missing at: every room has its name and area', await labels.count()===2 && (await labels.locator('text').count())===4);
+  const at = roomLabelPoint(missing.rooms[0]);
+  const drawnAt = await labelsPage.locator('[data-room-label-id="r1"] text').first().evaluate(t=>[Number(t.getAttribute('x')),Number(t.getAttribute('y'))]);
+  check('missing at: the editor uses the shared interior point', same(drawnAt,at));
+  check('missing at: file bytes stay unchanged, with no write', fileText()===raw && puts===0);
+  const toScreen = p => labelsPage.evaluate(([x,y])=>{const q=new DOMPoint(x,y).matrixTransform(document.querySelector('svg.plan-svg').getScreenCTM());return [q.x,q.y];},p);
+  const from = await toScreen(at), to = await toScreen([at[0]+300,at[1]+300]);
+  await labelsPage.mouse.move(...from); await labelsPage.mouse.down(); await labelsPage.mouse.move(...to,{steps:3}); await labelsPage.mouse.up();
+  check('missing at: dragging stores an explicit position', (await until(()=>!!fileJson().rooms[0].at))>=0 && !same(fileJson().rooms[0].at,at));
+  const labelSteps = await labelsPage.evaluate(()=>[...document.querySelectorAll('#history-content button')].filter(b=>b.textContent.includes('步驟')).length);
+  check('missing at: dragging is one undo step', labelSteps===1);
+  await labelsPage.keyboard.press('ControlOrMeta+z');
+  check('missing at: undo removes the stored position', (await until(()=>!fileJson().rooms[0].at))>=0);
+  await labelsPage.getByRole('button', {name:'3D 檢視'}).first().click();
+  await labelsPage.waitForSelector('[aria-label="3D floor-plan view"] canvas'); await sleep(1500);
+  check('missing at: 3D also shows both room labels', (await labelsPage.locator('.room-label').count())===2);
+  await labelsPage.close();
+  const websiteContext = await browser.newContext({viewport:{width:1440,height:900},deviceScaleFactor:1});
+  await websiteContext.addInitScript(({raw})=>{localStorage.setItem('open-plan:document:v1',raw);localStorage.setItem('open-plan:document:v1:session','previous session');},{raw});
+  const website = await websiteContext.newPage(); website.on('pageerror',e=>errors.push(e.message));
+  await website.goto(started.url.split('#')[0]); await website.waitForSelector('[data-room-label-id="r1"]'); await sleep(800);
+  check('missing at: website labels do not write or take a session copy', await website.evaluate(raw=>localStorage.getItem('open-plan:document:v1')===raw&&localStorage.getItem('open-plan:document:v1:session')==='previous session',raw));
+  await websiteContext.close();
 
   check('no page errors', errors.length === 0, errors.join(' | '));
 } finally {

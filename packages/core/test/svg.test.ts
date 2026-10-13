@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createSamplePlan, fitBounds, planGeometry, renderPlanSvg } from '../src/index.js';
+import { createSamplePlan, fitBounds, planGeometry, renderPlanSvg, roomLabelPoint, containsPoint } from '../src/index.js';
 
 const sample = createSamplePlan('s');
 const count = (svg: string, pattern: RegExp) => (svg.match(pattern) ?? []).length;
@@ -78,4 +78,21 @@ describe('opening symbols follow their wall', () => {
       }
     });
   }
+});
+
+describe('optional room label positions', () => {
+  it('uses the same interior point in SVG, keeps explicit positions, and does not add at', () => {
+    const room = { ...sample.rooms[0], poly: [[0, 0], [4000, 0], [4000, 1000], [1000, 1000], [1000, 4000], [0, 4000]] as [number, number][] };
+    delete room.at;
+    const before = JSON.stringify(room), at = roomLabelPoint(room);
+    expect(at).toEqual([2000, 500]);
+    expect(containsPoint(room.poly, ...at)).toBe(true);
+    expect(renderPlanSvg({ ...sample, rooms: [room] })).toContain('x="2000" y="500"');
+    expect(JSON.stringify(room)).toBe(before);
+    expect(roomLabelPoint({ ...room, at: [50, 80] })).toEqual([50, 80]);
+    expect(roomLabelPoint({ poly: [[0, 0], [10, 0], [20, 0]] })).toEqual([0, 0]);
+    expect(roomLabelPoint({ poly: [[0, 0], [4000, 0], [4000, 3000], [0, 3000], [0, 1500]] })).toEqual([2000, 1500]);
+    const thin ={ ...room, poly: [[0, 0], [0.1, 0], [0.1, 100000], [0, 100000]] as [number, number][] };
+    expect(renderPlanSvg({ ...sample, rooms: [thin] })).toContain('x="0.05" y="50000"');
+  });
 });

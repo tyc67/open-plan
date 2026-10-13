@@ -218,8 +218,17 @@ describe('rooms through the core commands', () => {
     // Found in a review: point heights at each of the old fixed line heights gave no point, and so a room with no label.
     const steps = [0, 630, 1110, 1500, 1890, 2370, 3000], stairs = [[0, 0], [4000, 0], ...steps.slice(1).map(y => [4000, y]), [0, 3000], ...steps.slice(1, -1).reverse().map(y => [0, y])];
     const label = interiorPoint(stairs);
-    expect([label !== null, containsPoint(stairs, label[0], label[1]), steps.includes(label[1])]).toEqual([true, true, false]);
+    // Points in the middle of a straight side make no band, so the label is at the centre of this rectangle.
+    expect([label, containsPoint(stairs, label[0], label[1])]).toEqual([[2000, 1500], true]);
     expect(addRoomCommands(withRooms([]), stairs)[0].at).toEqual(label);
+    // The same heights at real corners (no point is in the middle of a straight side): the line of the label is not at a point height.
+    const zigzag = [[0, 0], [4000, 0], ...steps.slice(1, -1).map((y, i) => [i % 2 ? 4000 : 3900, y]), [4000, 3000], [0, 3000]], inZigzag = interiorPoint(zigzag);
+    expect([inZigzag !== null, containsPoint(zigzag, inZigzag[0], inZigzag[1]), steps.includes(inZigzag[1])]).toEqual([true, true, false]);
+    // Found in a review: a repeated corner is in line with its copy; it must stay a corner.
+    const twice = square.flatMap(p => [p, p]), cornerTwice = [[0, 0], [4000, 0], [4000, 1000], [1000, 1000], [1000, 1000], [1000, 4000], [0, 4000]];
+    expect(interiorPoint(twice)).toEqual([2000, 1500]);
+    expect([interiorPoint(cornerTwice), containsPoint(cornerTwice, ...interiorPoint(cornerTwice))]).toEqual([[2000, 500], true]);
+    expect(interiorPoint([...square, square[0]])).toEqual([2000, 1500]);                            // the first point again at the end
     // A very thin room: rounding to 0.1 mm must not put the point on an edge.
     const thin = interiorPoint([[0, 0], [0.1, 0], [0.1, 100000], [0, 100000]]);
     expect([thin[0] > 0 && thin[0] < 0.1, thin[1]]).toEqual([true, 50000]);

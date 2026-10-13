@@ -1,4 +1,4 @@
-import { applyCommands, DEFAULT_HEIGHTS, wallDirection, wallLength, wallRect } from 'open-plan-core';
+import { applyCommands, DEFAULT_HEIGHTS, wallDirection, wallLength, wallRect, interiorPoint } from 'open-plan-core';
 
 // Editing in the editor through the core commands (roadmap D4): an edit is a batch of commands on the open plan, so
 // the editor, the CLI and MCP follow the same rules. A refused batch changes nothing.
@@ -196,36 +196,6 @@ export function snapRoomPoint(point, plan, tolerance, { near = [], align = [], f
   return [best[0] ?? grid(point[0]), best[1] ?? grid(point[1])];
 }
 
-/** The X values where a horizontal line at `y` goes through the outline, sorted. `y` is not the height of a point. */
-function crossings(poly, y) {
-  const xs = [];
-  poly.forEach((a, i) => { const b = poly[(i + 1) % poly.length]; if ((a[1] > y) !== (b[1] > y)) xs.push(a[0] + (b[0] - a[0]) * (y - a[1]) / (b[1] - a[1])); });
-  return xs.sort((p, q) => p - q);
-}
-
-/**
- * A point that is inside the outline (not on its edge), for the label of a new room. The outline is cut into bands
- * between the heights of its points; a horizontal line through the middle of a band goes through no point of the
- * outline, so its parts inside the outline are clear. The result is the middle of the part with the largest
- * width × band height. Null for an outline with no area.
- */
-export function interiorPoint(poly) {
-  const heights = [...new Set(poly.map(p => p[1]))].sort((p, q) => p - q);
-  let found = null, largest = 0;
-  for (let band = 0; band + 1 < heights.length; band++) {
-    const y = (heights[band] + heights[band + 1]) / 2, xs = crossings(poly, y);
-    for (let i = 0; i + 1 < xs.length; i += 2) {
-      const size = (xs[i + 1] - xs[i]) * (heights[band + 1] - heights[band]);
-      if (size > largest) { largest = size; found = [(xs[i] + xs[i + 1]) / 2, y]; }
-    }
-  }
-  if (!found) return null;
-  // The rounded point (0.1 mm) is used only when it is still inside the outline: in a very thin room, or beside a
-  // sloping edge, rounding can put it on an edge or outside, and then the exact middle is kept.
-  const x = round(found[0]), y = round(found[1]), xs = heights.includes(y) ? [] : crossings(poly, y);
-  return xs.some((from, i) => i % 2 === 0 && from < x && x < xs[i + 1]) ? [x, y] : found;
-}
-
 /** The material that a plan with no material gets with its first room from the editor. */
 export const DEFAULT_MATERIAL = { key: 'floor', name: '地板', sw: '#e8e2d6' };
 export const NEW_ROOM_NAME = '新空間';
@@ -239,3 +209,5 @@ export function addRoomCommands(plan, poly) {
   const room = { op: 'add_room', name: NEW_ROOM_NAME, mat: keys[0] ?? DEFAULT_MATERIAL.key, poly: poly.map(p => [p[0], p[1]]), ...(at ? { at } : {}) };
   return keys.length ? [room] : [{ op: 'set_material', ...DEFAULT_MATERIAL }, room];
 }
+
+export { interiorPoint } from 'open-plan-core';
