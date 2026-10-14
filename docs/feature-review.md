@@ -24,7 +24,18 @@ This review is from 2026-10-06, before Steps A to D of the roadmap. Its file nam
 | L17 | Open | The export file name is always `open-plan.json`. |
 | L18 | Open | The price field handles Enter with no IME check. |
 
-Later limits and open points (Steps A to D) are in `docs/plan-import-roadmap.md`, not here.
+Later limits and open points (Steps A to D) are in `docs/plan-import-roadmap.md`, not here. The section below is an exception: it records 4 known gaps that were only in commit messages.
+
+## Known gaps on 2026-10-14
+
+These gaps are known and not corrected. Before this date, 3 of them were only in the commit message of `0738dae` (the rule for measurements and dimension chains far from the plan), and the last one was only in the README. **No gap in this table was examined again on this date.** The text comes from the records of the work.
+
+| ID | Area | Gap | Effect |
+| --- | --- | --- | --- |
+| G1 | Validator | The limits for a measurement or a dimension chain far from the plan are estimates: 20 m (or the longer side of the plan, if more) for the warning `annotation-far-from-plan`, and 100 m for `annotation-out-of-range`. They were not verified with real plans. | A correct annotation on a very large plan can get a warning or an error. An incorrect one that is nearer than the limit gets no report. |
+| G2 | Commands | No command adds, removes or edits a measurement. `scale_plan` scales the measurements with the plan, and `set_dimensions` replaces the dimension chains only. | An agent cannot repair a plan that has a far measurement with `apply`. The user deletes the measurement in the editor, or the file is edited directly. |
+| G3 | View | Walls, rooms or furniture with a value that is not finite are covered for the view only: the fit of the 2D view stays finite. The size summary (`summarizePlan` in `packages/core/src/bounds.ts`) then has no usable box and gives 0 × 0 m. | The size summary can be wrong for such a plan. The validator has type checks that refuse a number that is not finite; the gap is for a plan that gets to the summary without those checks. This path was not reproduced. |
+| G4 | Geometry | A wall is horizontal or vertical only. | A plan with diagonal walls must be approximated. |
 
 ## Summary
 
