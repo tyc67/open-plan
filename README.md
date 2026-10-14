@@ -76,4 +76,4 @@ Screenshots: `node tools/visual/capture.mjs <url> <out-dir>`, then `node tools/v
 
 ## Origin and licences
 
-The project started from the Mamezu codebase (workspace shell, panels, toolbar) and from a single-file apartment reference (`floorplan-3d`). `donor/mamezu/` and `reference/` are local copies that Git does not track. **The source attribution and the third-party notices of the donor are only in `donor/mamezu/`, in local copies. Check them, and add a licence and the notices to the repository, before any redistribution.** The CLI build writes the notices of its bundled npm packages to `packages/cli/dist/THIRD-PARTY-NOTICES.txt`.
+The project started from the Mamezu codebase (workspace shell, panels, toolbar) and from a single-file apartment reference (`floorplan-3d`). `donor/mamezu/` and `reference/` are local copies that Git does not track. The CLI build writes the notices of its bundled npm packages to `packages/cli/dist/THIRD-PARTY-NOTICES.txt`.
