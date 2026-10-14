@@ -1,4 +1,4 @@
-// Procedural models and materials ported from the floorplan-3d reference.
+// Procedural models and materials.
 // This module is self-contained; ignored reference/donor directories are not needed at runtime.
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';

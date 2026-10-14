@@ -3,7 +3,7 @@ import { migrateV1 } from './migrate-v1.js';
 import type { DimensionChain, Furniture, Material, PlanV1, PlanV2, Point, Rect, Room } from './types.js';
 import { CHILD_POLYGON, LAUNDRY_POLYGON } from './v1-document.js';
 
-// The sample apartment, adapted from reference/floorplan-3d.html. Units: mm. It is defined in the v1 shape and
+// The sample apartment. Units: mm. It is defined in the v1 shape and
 // migrated, so there is one source for its geometry (roadmap A1).
 const WALLS: [number, number, number, number, string][] = [
   // 頂部外牆
