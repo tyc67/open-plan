@@ -1,6 +1,6 @@
 # Plan import roadmap
 
-First written on 2026-10-06 as a proposal, before any code. **Status on 2026-10-11: Steps A to D are closed (Steps C and D with accepted exceptions, see their status blocks); Step E is not started; nothing is published (no remote, no public package, see Decisions and open questions).** Each dated section is a record of its date: file locations and present-tense text in it describe that date, not today.
+First written on 2026-10-06 as a proposal, before any code. **Status on 2026-10-14: Steps A to D are closed (Steps C and D with accepted exceptions, see their status blocks); Step E is deferred; the source is public on GitHub (<https://github.com/tyc67/open-plan>, since 2026-10-14), with no public package and no deployed website (see Decisions and open questions).** Each dated section is a record of its date: file locations and present-tense text in it describe that date, not today.
 
 ## Summary
 
@@ -851,6 +851,8 @@ Forms:
 - **Real-image exercise (Step B, "Real image"), 2026-10-08:** done in C4b (see the C4b note and its record). The user closed the item without a separate visual review.
 
 **Decided (the user, 2026-10-11): release, "stay local".** After Step D, the product was checked against its two main intents (with the Codex reviewer): no main feature of Steps A to D is missing, and the one gap that blocks the first intent for a public user is distribution (no remote, no public package, no deployed website). The options were: stay local, give out the packed CLI, deploy the static website, or publish both. The user's answer: "stay local". So there is no release milestone now. Not done, and not needed while the product stays local: the package name and scope, a deployment of the website, and tests with other agents (C5d). A later change of this decision starts with those items. (Changed on 2026-10-14 by the user's instruction: this list also had an item about a licence file and the donor notices; it was removed, with the same sentence in the README. The user's statement: the donor codebase and the apartment reference are public references.)
+
+**Decided (the user, 2026-10-14): the source is public.** The user's instruction: "public repo, name it open-plan". The repository was pushed to <https://github.com/tyc67/open-plan> at commit `f35073d`, with its full history. This changes one part of the decision of 2026-10-11: the source can now be viewed and cloned by other people. The other parts stay: no package is published (the 4 packages are marked private, and the package name and scope are not decided), the website is not deployed, and the tests with other agents (C5d) are not done. The repository has no licence file.
 
 **Open:**
 - **Focus after Escape in the import dialog, development build only (found 2026-10-08).** With a React development build (`pnpm dev`, or a build with `NODE_ENV=test`), focus does not go back to the 匯入 button when Escape closes the dialog; `tools/checks/import.mjs` then fails "keyboard: focus goes back to the 匯入 button". The production build passes, and C3a has the same behaviour. Probable cause: StrictMode runs effects twice in development, and the focus return in `PlanImport.jsx` (a microtask that skips an inert opener) runs at the wrong time. Not fixed in C3b.
